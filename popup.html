@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>الجلسات والمهام - نافذة منبثقة</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/dexie@3.2.3/dist/dexie.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        body { background: #0f172a; color: #e2e8f0; font-family: 'Tajawal', sans-serif; padding: 1rem; }
+        .gold-text { background: linear-gradient(135deg, #c49a45 0%, #e8d5a3 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: bold; }
+        .card-item { background: rgba(0,0,0,0.4); border: 1px solid rgba(212,175,55,0.2); border-radius: 12px; padding: 12px; margin-bottom: 12px; transition: 0.2s; }
+        .card-item:hover { border-color: #d4af37; background: rgba(212,175,55,0.05); }
+        .badge-status { font-size: 0.7rem; padding: 2px 8px; border-radius: 20px; }
+        .btn-sm-custom { padding: 4px 8px; font-size: 0.75rem; }
+        hr { border-color: rgba(212,175,55,0.3); }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h3 class="gold-text"><i class="bi bi-window-sidebar"></i> الجلسات والمهام القادمة</h3>
+            <button class="btn btn-sm btn-outline-secondary" onclick="refreshData()"><i class="bi bi-arrow-clockwise"></i> تحديث</button>
+        </div>
+        <ul class="nav nav-tabs mb-3" id="popupTab" role="tablist">
+            <li class="nav-item"><button class="nav-link active text-white" id="sessions-tab-pop" data-bs-toggle="tab" data-bs-target="#sessions-pop" type="button" role="tab">الجلسات القادمة</button></li>
+            <li class="nav-item"><button class="nav-link text-white" id="tasks-tab-pop" data-bs-toggle="tab" data-bs-target="#tasks-pop" type="button" role="tab">المهام</button></li>
+        </ul>
+        <div class="tab-content">
+            <div class="tab-pane fade show active" id="sessions-pop" role="tabpanel"><div id="popupSessionsList">جار التحميل...</div></div>
+            <div class="tab-pane fade" id="tasks-pop" role="tabpanel"><div id="popupTasksList">جار التحميل...</div></div>
+        </div>
+    </div>
+    <script>
+        const db = new Dexie('LawDeskDB');
+        db.version(1).stores({ cases: 'id, client_name, client_phone, client_email, client_role, opponent_name, case_number, case_year, court_name, circuit, case_type, case_subject, case_code, archived', sessions: 'id, case_id, session_date, case_status, decision', tasks: '++id, description, date, completed', events: '++id, title, date, type', fees: 'case_id, total, paid, remaining, notes', payments: '++id, case_id, amount, date, note', pendingOperations: '++id, operation, data, timestamp' });
+        async function loadSessions() {
+            try {
+                const today = new Date().toISOString().split('T')[0];
+                const sessions = await db.sessions.where('session_date').aboveOrEqual(today).toArray();
+                sessions.sort((a,b)=>a.session_date.localeCompare(b.session_date));
+                let html = '';
+                for(let s of sessions){
+                    const caseData = await db.cases.get(s.case_id);
+                    if(!caseData) continue;
+                    const sessionDate = new Date(s.session_date).toLocaleString('ar-EG', {dateStyle:'full', timeStyle:'short'});
+                    html += `<div class="card-item"><div class="d-flex justify-content-between align-items-start"><div><strong class="gold-text">${caseData.client_name}</strong><span class="badge-status bg-secondary mx-2">${caseData.case_number}/${caseData.case_year}</span><span class="badge-status ${s.case_status==='محكوم فيها'?'bg-danger':'bg-warning text-dark'}">${s.case_status}</span></div><div><button class="btn btn-sm btn-outline-warning btn-sm-custom me-1" onclick="editSession('${s.id}')"><i class="bi bi-pencil"></i></button><button class="btn btn-sm btn-outline-danger btn-sm-custom" onclick="deleteSession('${s.id}')"><i class="bi bi-trash"></i></button></div></div><div class="mt-2 small text-white-50">📅 ${sessionDate}</div><div class="small">${s.decision?s.decision.substring(0,80):'لا يوجد قرار'}</div></div>`;
+                }
+                document.getElementById('popupSessionsList').innerHTML = html || '<div class="text-muted text-center">لا توجد جلسات قادمة</div>';
+            } catch(e){ document.getElementById('popupSessionsList').innerHTML = '<div class="text-danger">خطأ</div>'; }
+        }
+        async function loadTasks() {
+            try {
+                const today = new Date().toISOString().split('T')[0];
+                const tasks = await db.tasks.where('date').aboveOrEqual(today).filter(t=>!t.completed).toArray();
+                tasks.sort((a,b)=>a.date.localeCompare(b.date));
+                let html = '';
+                for(let t of tasks){
+                    html += `<div class="card-item"><div class="d-flex justify-content-between align-items-start"><div><i class="bi bi-check-circle text-warning"></i><strong> ${t.description}</strong><span class="badge-status bg-secondary mx-2">${t.date}</span></div><div><button class="btn btn-sm btn-outline-success btn-sm-custom me-1" onclick="toggleTaskComplete('${t.id}')"><i class="bi bi-check-lg"></i></button><button class="btn btn-sm btn-outline-danger btn-sm-custom" onclick="deleteTask('${t.id}')"><i class="bi bi-trash"></i></button></div></div></div>`;
+                }
+                document.getElementById('popupTasksList').innerHTML = html || '<div class="text-muted text-center">لا توجد مهام معلقة</div>';
+            } catch(e){}
+        }
+        window.refreshData = function(){ loadSessions(); loadTasks(); };
+        window.editSession = async function(id){ const s=await db.sessions.get(id); if(!s) return; const newStatus=prompt('تعديل حالة الجلسة:',s.case_status); if(newStatus && newStatus!==s.case_status){ await db.sessions.update(id,{case_status:newStatus}); await db.pendingOperations.add({operation:'update_session',data:{id:id,case_status:newStatus},timestamp:Date.now()}); Swal.fire({icon:'success',title:'تم التحديث',timer:1000,showConfirmButton:false}); refreshData(); } };
+        window.deleteSession = async function(id){ const confirm=await Swal.fire({title:'تأكيد الحذف',text:'هل تريد حذف هذه الجلسة؟',icon:'warning',showCancelButton:true,confirmButtonColor:'#d33',confirmButtonText:'نعم',background:'#0f172a',color:'#fff'}); if(confirm.isConfirmed){ await db.sessions.delete(id); await db.pendingOperations.add({operation:'delete_session',data:{id:id},timestamp:Date.now()}); refreshData(); } };
+        window.toggleTaskComplete = async function(id){ await db.tasks.update(id,{completed:true}); await db.pendingOperations.add({operation:'update_task',data:{id:id,completed:true},timestamp:Date.now()}); refreshData(); };
+        window.deleteTask = async function(id){ const confirm=await Swal.fire({title:'تأكيد حذف المهمة',text:'هل تريد حذف هذه المهمة؟',icon:'warning',showCancelButton:true,confirmButtonColor:'#d33',background:'#0f172a',color:'#fff'}); if(confirm.isConfirmed){ await db.tasks.delete(id); await db.pendingOperations.add({operation:'delete_task',data:{id:id},timestamp:Date.now()}); refreshData(); } };
+        loadSessions(); loadTasks(); setInterval(()=>refreshData(),30000);
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

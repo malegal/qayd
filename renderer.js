@@ -1,0 +1,948 @@
+// ========== renderer.js - النسخة النهائية المتكاملة (شريط جانبي مبسط + ترخيص 90 يوم + مودال إعدادات) ==========
+window.onerror = function(message, source, lineno, colno, error) {
+    console.error('خطأ شامل:', message, error);
+    Swal.fire({ icon: 'error', title: 'خطأ غير متوقع', text: message, background: '#0f172a', color: '#fff' });
+    return false;
+};
+window.onunhandledrejection = function(event) {
+    console.error('وعد غير معالج:', event.reason);
+    Swal.fire({ icon: 'error', title: 'خطأ غير معالج', text: event.reason?.message || 'خطأ غير معروف', background: '#0f172a', color: '#fff' });
+};
+
+// ========== 1. الإعدادات وقواعد البيانات ==========
+let ipcRenderer = null;
+try { if (window.electronAPI) ipcRenderer = window.electronAPI; } catch(e) { console.log('ليس في بيئة إلكترون'); }
+
+const db = new Dexie('LawDeskDB');
+db.version(4).stores({
+    cases: 'id, office_id, client_name, client_phone, client_email, client_role, opponent_name, case_number, case_year, court_name, circuit, case_type, case_subject, case_code, archived',
+        sessions: 'id, office_id, case_id, session_date, case_status, decision',
+        fees: 'case_id, total, paid, remaining, notes',
+        payments: '++id, case_id, amount, date, note',
+        events: '++id, title, date, type',
+        tasks: '++id, description, date, completed',
+        pendingOperations: '++id, operation, data, timestamp',
+        offices: '++id, office_id, office_name, pin, email, license_key, license_expiry'
+}).upgrade(async tx => {
+    const oldOffices = await tx.offices.toArray();
+    for (let o of oldOffices) if (!o.license_key) await tx.offices.update(o.id, { license_key: null, license_expiry: null });
+    const oldCases = await tx.cases.toArray();
+    for (let c of oldCases) if (!c.office_id) await tx.cases.update(c.id, { office_id: 'default_office' });
+    const oldSessions = await tx.sessions.toArray();
+    for (let s of oldSessions) if (!s.office_id) await tx.sessions.update(s.id, { office_id: 'default_office' });
+});
+
+let supabaseClient = null;
+let currentOfficeId = null;
+let currentOfficeName = null;
+let activeCaseId = null, activeSessionId = null, currentCaseForPrint = null, currentDate = new Date();
+let currentSelectedDateStr = null, rescheduleSessionId = null;
+
+let DEV_MODE = false;
+(async () => {
+    if (ipcRenderer && ipcRenderer.getDevMode) {
+        DEV_MODE = await ipcRenderer.getDevMode();
+        console.log('وضع التطوير:', DEV_MODE ? 'نشط (بدون ترخيص)' : 'إنتاج (يتطلب ترخيص)');
+    }
+})();
+
+function generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+
+async function initSupabase() {
+    if (supabaseClient) return supabaseClient;
+    try {
+        if (ipcRenderer && ipcRenderer.getSupabaseKeys) {
+            const keys = await ipcRenderer.getSupabaseKeys();
+            supabaseClient = supabase.createClient(keys.url, keys.key);
+            console.log('✅ تم تهيئة Supabase');
+        } else {
+            const fallbackUrl = "https://llcnpgokoaqqdmxjbkol.supabase.co";
+            const fallbackKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxsY25wZ29rb2FxcWRteGpia29sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwNTk0NzgsImV4cCI6MjA5MjYzNTQ3OH0._JTy-yr4rv4OxvaD0w_D12hSTMqLCLN2xBdHpcs3L4E";
+            supabaseClient = supabase.createClient(fallbackUrl, fallbackKey);
+        }
+        return supabaseClient;
+    } catch (err) { console.error('خطأ في تهيئة Supabase:', err); return null; }
+}
+
+async function setSupabaseOfficeId(officeId) {
+    if (!supabaseClient) await initSupabase();
+    if (supabaseClient) {
+        try { await supabaseClient.rpc('set_office_id', { office_id: officeId }); }
+        catch(e) { console.warn('فشل تعيين office_id', e); }
+    }
+}
+
+function showModal(id) {
+    let el = document.getElementById(id);
+    if(el) {
+        let modal = bootstrap.Modal.getOrCreateInstance(el);
+        if (id === 'rescheduleModal') el.style.zIndex = 1060;
+        modal.show();
+    }
+}
+function hideModal(id) { let el = document.getElementById(id); if(el) bootstrap.Modal.getOrCreateInstance(el).hide(); }
+
+async function updatePendingBadge() {
+    try { const count = await db.pendingOperations.count(); const badge = document.getElementById('syncBadge'); if(badge) { badge.innerText = count; badge.style.display = count > 0 ? 'block' : 'none'; } }
+    catch(e) { console.warn("خطأ في تحديث العداد", e); }
+}
+
+function updateSidebarOfficeName(name) {
+    const el = document.getElementById('sidebarOfficeName');
+    if (el) el.innerText = name || 'اسم المحامي';
+}
+
+// ========== 2. دوال الترخيص والعرض ==========
+async function loadAndDisplayLicenseStatus() {
+    const offices = await db.offices.toArray();
+    const activateBtn = document.getElementById('activateLicenseBtn');
+    if (offices.length === 0) {
+        document.getElementById('licenseStatusText').innerText = 'غير مفعل';
+        if (activateBtn) activateBtn.style.display = 'block';
+        return;
+    }
+    const licenseKey = offices[0].license_key;
+    const expiryDate = offices[0].license_expiry;
+    if (!licenseKey || !expiryDate) {
+        document.getElementById('licenseStatusText').innerHTML = '<span class="text-warning">غير مفعل</span>';
+        if (activateBtn) activateBtn.style.display = 'block';
+        return;
+    }
+    const expiry = new Date(expiryDate);
+    const now = new Date();
+    const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
+    if (daysLeft <= 0) {
+        document.getElementById('licenseStatusText').innerHTML = '<span class="text-danger">منتهي الصلاحية</span>';
+        if (activateBtn) activateBtn.style.display = 'block';
+    } else if (daysLeft <= 7) {
+        document.getElementById('licenseStatusText').innerHTML = `<span class="text-warning">ينتهي بعد ${daysLeft} يوم</span>`;
+        if (activateBtn) activateBtn.style.display = 'none';
+    } else {
+        document.getElementById('licenseStatusText').innerHTML = `<span class="text-success">ساري (${daysLeft} يوم متبقي)</span>`;
+        if (activateBtn) activateBtn.style.display = 'none';
+    }
+}
+
+async function checkLicenseValidity(licenseKey) {
+    if (!supabaseClient) await initSupabase();
+    const { data, error } = await supabaseClient
+    .from('licenses')
+    .select('license_key, expiry_date, is_active')
+    .eq('license_key', licenseKey)
+    .single();
+    if (error || !data) return { valid: false, message: 'مفتاح الترخيص غير صالح' };
+    if (!data.is_active) return { valid: false, message: 'هذا المفتاح معطل' };
+    const expiry = new Date(data.expiry_date);
+    if (expiry < new Date()) return { valid: false, message: 'انتهت صلاحية الترخيص في ' + data.expiry_date };
+    return { valid: true, expiry: data.expiry_date, message: 'ترخيص صالح' };
+}
+
+window.showLicenseModal = function() {
+    document.getElementById('licenseModalOptions').style.display = 'block';
+    document.getElementById('activationInputArea').style.display = 'none';
+    document.getElementById('trialEmailArea').style.display = 'none';
+    showModal('licenseModal');
+};
+window.showActivationInput = function() {
+    document.getElementById('licenseModalOptions').style.display = 'none';
+    document.getElementById('activationInputArea').style.display = 'block';
+    document.getElementById('activationCode').focus();
+};
+window.hideActivationInput = function() {
+    document.getElementById('activationInputArea').style.display = 'none';
+    document.getElementById('licenseModalOptions').style.display = 'block';
+};
+window.startFreeTrial = function() {
+    document.getElementById('licenseModalOptions').style.display = 'none';
+    document.getElementById('trialEmailArea').style.display = 'block';
+    document.getElementById('trialEmail').focus();
+};
+window.hideTrialEmail = function() {
+    document.getElementById('trialEmailArea').style.display = 'none';
+    document.getElementById('licenseModalOptions').style.display = 'block';
+};
+
+window.startFreeTrialWithEmail = async function() {
+    const email = document.getElementById('trialEmail').value.trim();
+    if (!email || !email.includes('@')) {
+        Swal.fire('خطأ', 'يرجى إدخال بريد إلكتروني صحيح', 'error');
+        return;
+    }
+    const trialKey = 'TRIAL-' + Math.random().toString(36).substring(2, 10).toUpperCase();
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + 90);
+    const expiryStr = expiryDate.toISOString().split('T')[0];
+
+    await initSupabase();
+    const { error } = await supabaseClient.from('licenses').insert([{
+        license_key: trialKey,
+        email: email,
+        expiry_date: expiryStr,
+        is_active: true,
+        notes: 'نسخة تجريبية 90 يوم'
+    }]);
+    if (error) {
+        console.error('فشل إنشاء الترخيص التجريبي:', error);
+        Swal.fire('خطأ', 'حدث خطأ أثناء إنشاء الترخيص، حاول مرة أخرى', 'error');
+        return;
+    }
+    localStorage.setItem('pendingLicenseKey', trialKey);
+    localStorage.setItem('pendingLicenseExpiry', expiryStr);
+    hideModal('licenseModal');
+    Swal.fire('تم', 'تم تفعيل النسخة التجريبية لمدة 90 يوم', 'success').then(() => {
+        showModal('officeSetupModal');
+    });
+    await loadAndDisplayLicenseStatus();
+};
+
+window.verifyActivationCode = async function() {
+    const code = document.getElementById('activationCode').value.trim();
+    if (!code) return Swal.fire('خطأ', 'أدخل كود التفعيل', 'error');
+    await initSupabase();
+    const { data, error } = await supabaseClient.from('licenses').select('license_key, expiry_date, is_active').eq('license_key', code).single();
+    if (error || !data) return Swal.fire('خطأ', 'كود التفعيل غير صالح', 'error');
+    if (!data.is_active) return Swal.fire('خطأ', 'هذا الكود معطل', 'error');
+    const expiry = new Date(data.expiry_date);
+    if (expiry < new Date()) return Swal.fire('خطأ', 'انتهت صلاحية الكود', 'error');
+    localStorage.setItem('pendingLicenseKey', code);
+    localStorage.setItem('pendingLicenseExpiry', data.expiry_date);
+    hideModal('licenseModal');
+    Swal.fire('تم', 'تم تفعيل الترخيص بنجاح', 'success').then(() => {
+        showModal('officeSetupModal');
+    });
+    await loadAndDisplayLicenseStatus();
+};
+
+// ========== 3. نظام التبويبات اليدوي ==========
+function showTab(tabId) {
+    document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active', 'show'); pane.style.display = 'none'; });
+    const targetPane = document.getElementById(tabId);
+    if (targetPane) { targetPane.style.display = 'block'; targetPane.classList.add('active', 'show'); }
+    document.querySelectorAll('.nav-link').forEach(btn => {
+        btn.classList.remove('active');
+        const target = btn.getAttribute('data-bs-target');
+        if (target === '#' + tabId) btn.classList.add('active');
+    });
+}
+function bindManualTabs() {
+    document.querySelectorAll('.nav-link').forEach(btn => {
+        btn.removeEventListener('click', manualTabHandler);
+        btn.addEventListener('click', manualTabHandler);
+    });
+}
+function manualTabHandler(e) { e.preventDefault(); const target = this.getAttribute('data-bs-target'); if (target) showTab(target.substring(1)); }
+
+// ========== 4. إعداد المكتب (مع ربط الترخيص المعلق) ==========
+window.saveOfficeSetup = async function() {
+    const officeName = document.getElementById('officeNameInput').value.trim();
+    const email = document.getElementById('officeEmailInput').value.trim();
+    const pin = document.getElementById('initialPin').value;
+    const confirm = document.getElementById('confirmPin').value;
+    if (!officeName) return Swal.fire('خطأ', 'أدخل اسم المحامي أو المكتب', 'error');
+    if (pin !== confirm) return Swal.fire('خطأ', 'PIN غير متطابق', 'error');
+    if (pin.length < 4 || pin.length > 6) return Swal.fire('خطأ', 'PIN يجب أن يكون 4-6 أرقام', 'error');
+
+    let licenseKey = localStorage.getItem('pendingLicenseKey');
+    let licenseExpiry = localStorage.getItem('pendingLicenseExpiry');
+    if (!licenseKey && !DEV_MODE) {
+        Swal.fire('تنبيه', 'يجب تفعيل الترخيص قبل إعداد المكتب', 'warning');
+        showLicenseModal();
+        window.continueOfficeSetup = saveOfficeSetup;
+        return;
+    }
+
+    const officeId = generateUUID();
+    await db.offices.clear();
+    await db.offices.add({ office_id: officeId, office_name: officeName, pin, email: email || null, license_key: licenseKey, license_expiry: licenseExpiry });
+    currentOfficeId = officeId;
+    currentOfficeName = officeName;
+    updateSidebarOfficeName(officeName);
+    localStorage.removeItem('pendingLicenseKey');
+    localStorage.removeItem('pendingLicenseExpiry');
+    window.continueOfficeSetup = null;
+
+    if (licenseKey && supabaseClient) {
+        await supabaseClient.from('licenses').update({ office_id: officeId }).eq('license_key', licenseKey);
+    }
+
+    try {
+        await initSupabase();
+        if (supabaseClient) {
+            await supabaseClient.from('offices').insert([{ office_id: officeId, office_name: officeName, email: email || null, pin }]);
+        }
+    } catch(e) { console.warn(e); }
+
+    hideModal('officeSetupModal');
+    document.getElementById('loginPage').style.display = 'none';
+    document.getElementById('appContainer').style.display = 'block';
+    bindManualTabs();
+    showTab('agendaTab');
+    await loadRecentCases();
+    await loadUpcomingSessions('week');
+    await renderCalendar();
+    await loadStats();
+    updatePendingBadge();
+    checkUpcomingNotifications();
+    setInterval(checkUpcomingNotifications, 3600000);
+    await loadAndDisplayLicenseStatus();
+};
+
+// ========== 5. استرداد المكتب ==========
+window.showRecoveryModal = function() { showModal('recoverOfficeModal'); };
+window.showOfficeSetupInstead = function() { hideModal('recoverOfficeModal'); showModal('officeSetupModal'); };
+window.recoverOffice = async function() {
+    const email = document.getElementById('recoverEmail').value.trim();
+    const newPin = document.getElementById('newPinRecover').value;
+    const confirmPin = document.getElementById('confirmNewPinRecover').value;
+    if (!email) return Swal.fire('خطأ', 'أدخل البريد الإلكتروني', 'error');
+    if (newPin !== confirmPin) return Swal.fire('خطأ', 'PIN غير متطابق', 'error');
+    if (newPin.length < 4 || newPin.length > 6) return Swal.fire('خطأ', 'PIN يجب أن يكون 4-6 أرقام', 'error');
+
+    await initSupabase();
+    if (!supabaseClient) return Swal.fire('خطأ', 'لا يوجد اتصال بالإنترنت لاسترداد المكتب', 'error');
+
+    const { data, error } = await supabaseClient.from('offices').select('office_id, office_name').eq('email', email);
+    if (error || !data || data.length === 0) return Swal.fire('خطأ', 'لم يتم العثور على مكتب مرتبط بهذا البريد', 'error');
+    const office = data[0];
+    const officeId = office.office_id;
+    const officeName = office.office_name;
+
+    let licenseKey = null, licenseExpiry = null;
+    if (!DEV_MODE) {
+        const { data: licData } = await supabaseClient.from('licenses').select('license_key, expiry_date').eq('office_id', officeId).single();
+        if (licData) {
+            licenseKey = licData.license_key;
+            licenseExpiry = licData.expiry_date;
+        } else {
+            Swal.fire('تنبيه', 'هذا المكتب ليس لديه ترخيص صالح، الرجاء التفعيل', 'warning');
+            showLicenseModal();
+            return;
+        }
+    }
+
+    await db.offices.clear();
+    await db.offices.add({ office_id: officeId, office_name: officeName, pin: newPin, email, license_key: licenseKey, license_expiry: licenseExpiry });
+    currentOfficeId = officeId;
+    currentOfficeName = officeName;
+    updateSidebarOfficeName(officeName);
+
+    hideModal('recoverOfficeModal');
+    document.getElementById('loginPage').style.display = 'none';
+    document.getElementById('appContainer').style.display = 'block';
+    bindManualTabs();
+    showTab('agendaTab');
+
+    await setSupabaseOfficeId(currentOfficeId);
+    await downloadFromSupabase();
+    await loadRecentCases();
+    await loadUpcomingSessions('week');
+    await renderCalendar();
+    await loadStats();
+    updatePendingBadge();
+    checkUpcomingNotifications();
+    setInterval(checkUpcomingNotifications, 3600000);
+    await loadAndDisplayLicenseStatus();
+    Swal.fire('تم', 'تم استرداد المكتب بنجاح', 'success');
+};
+
+// ========== 6. تسجيل الدخول بـ PIN ==========
+async function checkOfficeSetup() {
+    const offices = await db.offices.toArray();
+    if (offices.length > 0) {
+        currentOfficeId = offices[0].office_id;
+        currentOfficeName = offices[0].office_name;
+        updateSidebarOfficeName(currentOfficeName);
+        await loadAndDisplayLicenseStatus();
+        return true;
+    }
+    return false;
+}
+window.verifyPin = async function() {
+    const entered = document.getElementById('pinInput').value;
+    const offices = await db.offices.toArray();
+    if (offices.length === 0) {
+        showLicenseModal();
+        return;
+    }
+    if (entered === offices[0].pin) {
+        currentOfficeId = offices[0].office_id;
+        currentOfficeName = offices[0].office_name;
+        updateSidebarOfficeName(currentOfficeName);
+
+        if (!DEV_MODE) {
+            const licenseKey = offices[0].license_key;
+            if (!licenseKey) {
+                Swal.fire('تنبيه', 'لا يوجد ترخيص صالح لهذا المكتب', 'warning');
+                showLicenseModal();
+                return;
+            }
+            const result = await checkLicenseValidity(licenseKey);
+            if (!result.valid) {
+                Swal.fire('خطأ', result.message, 'error');
+                showLicenseModal();
+                return;
+            } else if (new Date(offices[0].license_expiry) < new Date(Date.now() + 7*24*60*60*1000)) {
+                Swal.fire({
+                    icon: 'info',
+                    title: 'تنبيه',
+                    text: `ينتهي ترخيصك في ${offices[0].license_expiry}. يرجى تجديده قريباً.`,
+                    background: '#0f172a',
+                    color: '#fff',
+                    timer: 5000,
+                    showConfirmButton: true
+                });
+            }
+        }
+
+        document.getElementById('loginPage').style.display = 'none';
+        document.getElementById('appContainer').style.display = 'block';
+        bindManualTabs();
+        showTab('agendaTab');
+        await loadRecentCases();
+        await loadUpcomingSessions('week');
+        await renderCalendar();
+        await loadStats();
+        updatePendingBadge();
+        checkUpcomingNotifications();
+        setInterval(checkUpcomingNotifications, 3600000);
+        await loadAndDisplayLicenseStatus();
+    } else {
+        Swal.fire('خطأ', 'PIN غير صحيح', 'error');
+        document.getElementById('pinInput').value = '';
+    }
+};
+
+window.showChangePinModal = function() { showModal('changePinModal'); };
+window.changeOfficePin = async function() {
+    const old = document.getElementById('oldPin').value;
+    const newPin = document.getElementById('newPin').value;
+    const confirm = document.getElementById('confirmNewPin').value;
+    const offices = await db.offices.toArray();
+    if (offices.length === 0) return;
+    if (old !== offices[0].pin) return Swal.fire('خطأ', 'PIN الحالي غير صحيح', 'error');
+    if (newPin !== confirm) return Swal.fire('خطأ', 'PIN الجديد غير متطابق', 'error');
+    if (newPin.length < 4 || newPin.length > 6) return Swal.fire('خطأ', 'PIN يجب أن يكون 4-6 أرقام', 'error');
+    await db.offices.update(offices[0].id, { pin: newPin });
+    hideModal('changePinModal');
+    Swal.fire('تم', 'تم تغيير PIN بنجاح', 'success');
+};
+
+// ========== 7. التنبيهات ==========
+async function checkUpcomingNotifications() {
+    if (!ipcRenderer) return;
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+    const sessions = await db.sessions.filter(s => s.session_date && s.session_date.startsWith(tomorrowStr) && s.office_id === currentOfficeId).toArray();
+    if (sessions.length) ipcRenderer.showNotification('تنبيه الجلسات', `لديك ${sessions.length} جلسات غداً`);
+    const tasks = await db.tasks.where('date').equals(tomorrowStr).filter(t => !t.completed).toArray();
+    if (tasks.length) ipcRenderer.showNotification('تنبيه المهام', `لديك ${tasks.length} مهام غداً`);
+    const events = await db.events.where('date').equals(tomorrowStr).toArray();
+    if (events.length) ipcRenderer.showNotification('تنبيه الأحداث', `لديك ${events.length} أحداث غداً`);
+}
+
+// ========== 8. القضايا ==========
+let allCasesList = [];
+window.loadCasesList = async function() {
+    allCasesList = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).toArray();
+    filterCasesList();
+};
+function filterCasesList() {
+    let search = document.getElementById('caseSearchInput')?.value.toLowerCase() || '';
+    let court = document.getElementById('courtFilter')?.value || '';
+    let type = document.getElementById('typeFilter')?.value || '';
+    let filtered = allCasesList.filter(c =>
+    (c.client_name.toLowerCase().includes(search) || c.case_number.includes(search)) &&
+    (court === '' || c.court_name === court) &&
+    (type === '' || c.case_type === type)
+    );
+    const container = document.getElementById('casesListContainer');
+    if (!container) return;
+    container.innerHTML = filtered.map(c => `
+    <div class="case-card-item" data-id="${c.id}" onclick="selectCase('${c.id}')">
+    <div class="d-flex justify-content-between">
+    <strong class="gold-text">${escapeHtml(c.client_name)}</strong>
+    <span class="small text-white-50">${c.case_number}/${c.case_year}</span>
+    </div>
+    <div class="small">${c.court_name || ''} | ${c.case_type || ''}</div>
+    <div class="small text-warning mt-1">كود: ${c.case_code || 'غير محدد'}</div>
+    </div>
+    `).join('');
+}
+function escapeHtml(str) { if (!str) return ''; return str.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m])); }
+
+window.selectCase = async function(id) {
+    activeCaseId = id;
+    let c = await db.cases.get(id);
+    if (!c) return;
+    document.getElementById('caseDetailContent').innerHTML = `
+    <div class="mb-2"><span class="text-warning fw-bold">كود القضية:</span> <span class="badge bg-dark text-warning border border-warning px-2 py-1">${c.case_code || 'غير محدد'}</span></div>
+    <div><strong>العميل:</strong> ${escapeHtml(c.client_name)} (${c.client_role || ''})</div>
+    <div><strong>الخصم:</strong> ${escapeHtml(c.opponent_name || '-')}</div>
+    <div><strong>رقم القضية:</strong> ${c.case_number}/${c.case_year}</div>
+    <div><strong>المحكمة:</strong> ${c.court_name || ''} - دائرة ${c.circuit || ''}</div>
+    <div><strong>النوع:</strong> ${c.case_type || ''}</div>
+    <div><strong>الموضوع:</strong> ${escapeHtml(c.case_subject || '')}</div>
+    `;
+    let sessions = await db.sessions.where('case_id').equals(id).and(s => s.office_id === currentOfficeId).toArray();
+    document.getElementById('caseDetailSessions').innerHTML = sessions.map(s => `<div class="small border-bottom py-1">${new Date(s.session_date).toLocaleString()} - ${s.case_status}</div>`).join('') || 'لا توجد جلسات';
+    document.getElementById('caseActionsPanel').innerHTML = `
+    <button class="btn btn-sm btn-outline-info" onclick="openCaseFolderFromPanel()"><i class="bi bi-folder"></i> مجلد</button>
+    <button class="btn btn-sm btn-outline-warning" onclick="openEditCaseModalFromPanel()"><i class="bi bi-pencil"></i> تعديل</button>
+    <button class="btn btn-sm btn-outline-success" onclick="openFeesModalFromPanel()"><i class="bi bi-cash"></i> الأتعاب</button>
+    <button class="btn btn-sm btn-outline-primary" onclick="openTemplate('memo')"><i class="bi bi-file-word"></i> مذكرة</button>
+    <button class="btn btn-sm btn-outline-primary" onclick="openTemplate('announcement')"><i class="bi bi-megaphone"></i> إعلان</button>
+    <button class="btn btn-sm btn-outline-primary" onclick="openTemplate('pleading')"><i class="bi bi-file-text"></i> لائحة</button>
+    <button class="btn btn-sm btn-outline-secondary" onclick="openNotes()"><i class="bi bi-pencil-square"></i> ملاحظات</button>
+    <button class="btn btn-sm btn-danger" onclick="archiveCaseFromPanel()"><i class="bi bi-archive"></i> أرشفة</button>
+    `;
+};
+window.openCaseFolderFromPanel = async function() { if (!activeCaseId || !ipcRenderer) return; let c = await db.cases.get(activeCaseId); let folderName = `${c.case_code} - ${c.client_name}`.replace(/[<>:"\/\\|?*]/g, '_'); await ipcRenderer.openCaseFolder(folderName); };
+window.openEditCaseModalFromPanel = async function() { let c = await db.cases.get(activeCaseId); if (!c) return; document.getElementById('edit_c_name').value = c.client_name; document.getElementById('edit_c_phone').value = c.client_phone || ''; document.getElementById('edit_c_opponent').value = c.opponent_name || ''; document.getElementById('edit_c_num').value = c.case_number; document.getElementById('edit_c_year').value = c.case_year; document.getElementById('edit_c_court').value = c.court_name; document.getElementById('edit_c_circuit').value = c.circuit || ''; document.getElementById('edit_case_type').value = c.case_type || 'مدنية'; document.getElementById('edit_c_subject').value = c.case_subject || ''; hideModal('caseModal'); showModal('editCaseModal'); };
+window.openFeesModalFromPanel = async function() { if (activeCaseId) openFeesModal(activeCaseId); };
+window.archiveCaseFromPanel = async function() { if (activeCaseId) archiveCase(activeCaseId); };
+
+// إضافة قضية جديدة
+window.openAddCaseModal = () => showModal('addCaseModal');
+window.saveNewCase = async function() {
+    const caseData = {
+        id: 'C_' + Date.now(),
+        office_id: currentOfficeId,
+        client_name: document.getElementById('client_name').value,
+        client_phone: document.getElementById('client_phone').value,
+        client_email: document.getElementById('client_email').value,
+        client_role: document.getElementById('client_role').value,
+        opponent_name: document.getElementById('opponent_name').value,
+        case_number: document.getElementById('case_number').value,
+            case_year: document.getElementById('case_year').value,
+                court_name: document.getElementById('court_name').value,
+                circuit: document.getElementById('circuit').value,
+                case_type: document.getElementById('case_type').value,
+                    case_subject: document.getElementById('case_subject').value,
+                        case_code: null,
+                            archived: 0
+    };
+
+    await db.cases.add(caseData);
+
+    if (supabaseClient && currentOfficeId) {
+        try {
+            const { data: inserted, error } = await supabaseClient.from('cases').insert([caseData]).select('case_code');
+            if (!error && inserted && inserted[0]) {
+                const permanentCode = inserted[0].case_code;
+                await db.cases.update(caseData.id, { case_code: permanentCode });
+                caseData.case_code = permanentCode;
+                Swal.fire({ icon: 'success', title: 'تم الحفظ', text: `كود القضية: ${permanentCode}`, background: '#0f172a', color: '#fff', timer: 2000, showConfirmButton: false });
+            } else {
+                await db.pendingOperations.add({ operation: 'insert_case', data: caseData, timestamp: Date.now() });
+                Swal.fire({ icon: 'warning', title: 'تم الحفظ محلياً', text: 'سيتم المزامنة عند الاتصال بالإنترنت', background: '#0f172a', color: '#fff' });
+            }
+        } catch (err) {
+            console.error('فشل الإدراج المباشر:', err);
+            await db.pendingOperations.add({ operation: 'insert_case', data: caseData, timestamp: Date.now() });
+            Swal.fire({ icon: 'warning', title: 'تم الحفظ محلياً', text: 'سيتم المزامنة لاحقاً', background: '#0f172a', color: '#fff' });
+        }
+    } else {
+        await db.pendingOperations.add({ operation: 'insert_case', data: caseData, timestamp: Date.now() });
+        Swal.fire({ icon: 'info', title: 'تم الحفظ محلياً', text: 'قم بالمزامنة للحصول على الكود الدائم', background: '#0f172a', color: '#fff' });
+    }
+
+    let feeTotal = parseFloat(document.getElementById('fee_total').value);
+    if (feeTotal > 0) {
+        let feePaid = parseFloat(document.getElementById('fee_paid').value) || 0;
+        await db.fees.put({ case_id: caseData.id, total: feeTotal, paid: feePaid, remaining: feeTotal - feePaid, notes: document.getElementById('fee_notes').value });
+        if (feePaid > 0) await db.payments.add({ case_id: caseData.id, amount: feePaid, date: new Date().toISOString().split('T')[0], note: 'دفعة مقدمة' });
+    }
+
+    if (ipcRenderer?.createCaseFolder && caseData.case_code) {
+        ipcRenderer.createCaseFolder(caseData.case_code, caseData.client_name, caseData);
+    }
+
+    hideModal('addCaseModal');
+    document.getElementById('caseFormModal').reset();
+    document.getElementById('feesSectionModal').style.display = 'none';
+    loadCasesList();
+    updatePendingBadge();
+};
+window.toggleFeesSectionModal = function() { let s = document.getElementById('feesSectionModal'); if (s) s.style.display = s.style.display === 'none' ? 'block' : 'none'; };
+
+// القوالب والملاحظات
+async function ensureCaseFolder() {
+    let c = await db.cases.get(activeCaseId);
+    if (!c) return null;
+    let folderName = `${c.case_code} - ${c.client_name}`.replace(/[<>:"\/\\|?*]/g, '_');
+    if (ipcRenderer) {
+        let res = await ipcRenderer.openCaseFolder(folderName);
+        if (!res.success && ipcRenderer.createCaseFolder) await ipcRenderer.createCaseFolder(c.case_code, c.client_name, c);
+    }
+    return folderName;
+}
+window.openTemplate = async function(type) {
+    if (!activeCaseId) return Swal.fire('تنبيه', 'اختر قضية أولاً', 'warning');
+    let folderName = await ensureCaseFolder();
+    if (!folderName) return;
+    let templateMap = { memo: 'مذكرة.docx', announcement: 'إعلان.docx', pleading: 'لائحة_دعوى.docx' };
+    let fileName = templateMap[type] || 'مذكرة.docx';
+    let result = await ipcRenderer.openTemplate(folderName, fileName);
+    if (result && result.error) Swal.fire('خطأ', result.error, 'error');
+};
+window.openNotes = async function() {
+    if (!activeCaseId) return Swal.fire('تنبيه', 'اختر قضية أولاً', 'warning');
+    let folderName = await ensureCaseFolder();
+    if (!folderName) return;
+    let result = await ipcRenderer.openNotes(folderName);
+    if (result && result.error) Swal.fire('خطأ', result.error, 'error');
+};
+
+// ========== 9. الجلسات ==========
+window.searchCasesForSession = async function(q) {
+    if (q.length < 2) { document.getElementById('caseSearchResults').style.display = 'none'; return; }
+    try {
+        const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).filter(c => String(c.client_name).includes(q) || String(c.case_number).includes(q) || String(c.case_code).toLowerCase().includes(q.toLowerCase())).limit(10).toArray();
+        let html = cases.map(c => `<div class="p-2 border-bottom border-secondary text-white" style="cursor:pointer" onclick="selectCaseForSession('${c.id}')"><span class="text-warning">${c.case_code}</span> - ${c.client_name} (${c.case_number})</div>`).join('');
+        const resDiv = document.getElementById('caseSearchResults');
+        resDiv.innerHTML = html; resDiv.style.display = html ? 'block' : 'none';
+    } catch (e) { }
+};
+window.selectCaseForSession = async function(id) {
+    activeCaseId = id;
+    document.getElementById('caseSearchResults').style.display = 'none';
+    try {
+        const c = await db.cases.get(id);
+        if (c) {
+            document.getElementById('s_case_code').value = c.case_code;
+            document.getElementById('s_case_number').value = c.case_number;
+            document.getElementById('s_case_year').value = c.case_year;
+            document.getElementById('s_court').value = c.court_name;
+            document.getElementById('s_client').value = c.client_name;
+            document.getElementById('s_client_role').value = c.client_role;
+            document.getElementById('s_opponent').value = c.opponent_name || 'لا يوجد';
+        }
+    } catch (e) { }
+};
+window.saveSession = async function() {
+    if (!activeCaseId || !document.getElementById('s_date').value) { Swal.fire('تنبيه', 'اختر قضية وأدخل التاريخ', 'warning'); return; }
+    const sessionData = { id: 'S_' + Date.now(), office_id: currentOfficeId, case_id: activeCaseId, session_date: document.getElementById('s_date').value, case_status: document.getElementById('s_case_status').value, decision: document.getElementById('s_decision').value };
+    await db.sessions.add(sessionData);
+    await db.pendingOperations.add({ operation: 'insert_session', data: sessionData, timestamp: Date.now() });
+    Swal.fire({ icon: 'success', title: 'تم الحفظ محلياً', background: '#0f172a', showConfirmButton: false, timer: 1500 });
+    document.getElementById('s_decision').value = '';
+    loadUpcomingSessions('week'); renderCalendar(); updatePendingBadge();
+};
+window.loadUpcomingSessions = async function(range, btn) {
+    if (btn) { document.querySelectorAll('#sessions .btn-group .btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }
+    const now = new Date(); const start = now.toISOString().split('T')[0]; const end = new Date();
+    if (range === 'week') end.setDate(now.getDate() + 7); else end.setMonth(now.getMonth() + 1);
+    const endStr = end.toISOString().split('T')[0];
+    try {
+        const sessions = await db.sessions.where('session_date').between(start, endStr, true, true).filter(s => s.office_id === currentOfficeId).toArray();
+        sessions.sort((a, b) => a.session_date.localeCompare(b.session_date));
+        let html = '';
+        for (let s of sessions) {
+            const c = await db.cases.get(s.case_id);
+            if (c) html += `<div class="session-card" onclick="openCaseDetails('${c.id}')"><div class="d-flex justify-content-between"><span class="gold-text">${new Date(s.session_date).toLocaleString('ar-EG', { dateStyle: 'full', timeStyle: 'short' })}</span><span class="case-status status-new">${s.case_status}</span></div><div class="mt-2"><strong>${c.client_name}</strong> - ${c.case_number}/${c.case_year}</div><div class="mt-1 text-white">${s.decision || ''}</div></div>`;
+        }
+        document.getElementById('upcomingSessionsList').innerHTML = html || '<div class="text-muted">لا توجد جلسات في هذه الفترة</div>';
+    } catch (e) { }
+};
+window.openEditSession = async function(id) {
+    activeSessionId = id;
+    const s = await db.sessions.get(id);
+    if (!s) return;
+    document.getElementById('edit_s_date').value = s.session_date.slice(0, 16);
+    document.getElementById('edit_s_status').value = s.case_status;
+    document.getElementById('edit_s_decision').value = s.decision || '';
+    hideModal('caseModal'); showModal('editSessionModal');
+};
+window.cancelEditSession = function() { hideModal('editSessionModal'); openCaseDetails(activeCaseId); };
+window.saveEditedSession = async function() {
+    const updated = { session_date: document.getElementById('edit_s_date').value, case_status: document.getElementById('edit_s_status').value, decision: document.getElementById('edit_s_decision').value };
+    await db.sessions.update(activeSessionId, updated);
+    await db.pendingOperations.add({ operation: 'update_session', data: { id: activeSessionId, ...updated }, timestamp: Date.now() });
+    hideModal('editSessionModal');
+    openCaseDetails(activeCaseId);
+    renderCalendar(); loadUpcomingSessions('week'); updatePendingBadge();
+};
+
+// ========== 10. الأجندة والأحداث ==========
+window.changeMonth = function(dir) { currentDate.setMonth(currentDate.getMonth() + dir); renderCalendar(); };
+window.renderCalendar = async function() {
+    const year = currentDate.getFullYear(), month = currentDate.getMonth();
+    const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+    document.getElementById('calendarMonthYear').innerText = `${monthNames[month]} ${year}`;
+    const weekDays = ['السبت', 'الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
+    document.getElementById('calendarHeaders').innerHTML = weekDays.map(d => `<div class="calendar-header">${d}</div>`).join('');
+    const firstDay = new Date(year, month, 1);
+    let startDayIdx = firstDay.getDay(); let offset = startDayIdx === 0 ? 6 : startDayIdx - 1;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    try {
+        let sessions = await db.sessions.filter(s => s.office_id === currentOfficeId).toArray();
+        let events = await db.events.toArray();
+        let tasks = await db.tasks.toArray();
+        const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+        let html = '';
+        for (let i = 0; i < offset; i++) html += '<div class="calendar-day empty"></div>';
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dateStr = `${monthStr}-${String(d).padStart(2, '0')}`;
+            const dSess = sessions.filter(s => s.session_date && s.session_date.startsWith(dateStr));
+            const dEvt = events.filter(e => e.date === dateStr);
+            const dTask = tasks.filter(t => t.date === dateStr && !t.completed);
+            let isToday = (dateStr === new Date().toISOString().split('T')[0]);
+            let badges = '';
+            for (let s of dSess) badges += `<div class="day-badge badge-session" title="${s.case_status}" onclick="event.stopPropagation(); openRescheduleModal('${s.id}')">⚖️ جلسة ${s.session_date.slice(11, 16)}</div>`;
+            for (let e of dEvt) badges += `<div class="day-badge badge-event" title="${e.title}">📅 ${e.title}</div>`;
+            for (let t of dTask) badges += `<div class="day-badge badge-task" title="${t.description}">📌 ${t.description}</div>`;
+            html += `<div class="calendar-day ${isToday ? 'today' : ''}" onclick="showDayDetails('${dateStr}')"><div class="day-number">${d}</div><div class="d-flex flex-column gap-1 w-100">${badges}</div></div>`;
+        }
+        document.getElementById('calendarDays').innerHTML = html;
+        loadUpcomingEvents();
+    } catch (e) { console.error('خطأ في renderCalendar:', e); }
+};
+window.showDayDetails = async function(dateStr) {
+    currentSelectedDateStr = dateStr;
+    document.getElementById('dayModalTitle').innerText = `تفاصيل يوم ${dateStr}`;
+    try {
+        let sessions = await db.sessions.filter(s => s.session_date && s.session_date.startsWith(dateStr) && s.office_id === currentOfficeId).toArray();
+        let events = await db.events.where('date').equals(dateStr).toArray();
+        let tasks = await db.tasks.where('date').equals(dateStr).toArray();
+        let html = `<h6 class="gold-text"><i class="bi bi-briefcase"></i> الجلسات</h6>`;
+        if (sessions.length === 0) html += `<p class="small text-muted">لا يوجد</p>`;
+        for (let s of sessions) {
+            const c = await db.cases.get(s.case_id);
+            html += `<div class="p-2 mb-2 bg-dark rounded border border-danger cursor-pointer" onclick="hideModal('dayModal'); openCaseDetails('${c.id}')">${c?.client_name || 'غير معروف'} - ${s.case_status} <button class="btn btn-sm btn-outline-warning ms-2" onclick="event.stopPropagation(); openRescheduleModal('${s.id}')">ترحيل</button></div>`;
+        }
+        html += `<hr class="border-secondary"><h6 class="gold-text"><i class="bi bi-calendar-event"></i> الأحداث</h6>`;
+        if (events.length === 0) html += `<p class="small text-muted">لا يوجد</p>`;
+        for (let e of events) html += `<div class="p-2 mb-2 bg-dark rounded border border-success">${e.title}</div>`;
+        html += `<hr class="border-secondary"><h6 class="gold-text"><i class="bi bi-list-check"></i> المهام</h6>`;
+        if (tasks.length === 0) html += `<p class="small text-muted">لا يوجد</p>`;
+        for (let t of tasks) html += `<div class="p-2 mb-2 bg-dark rounded border border-warning d-flex justify-content-between align-items-center"><span style="text-decoration:${t.completed ? 'line-through' : 'none'}">${t.description}</span><input type="checkbox" ${t.completed ? 'checked' : ''} onchange="toggleTask('${t.id}', this.checked)"></div>`;
+        document.getElementById('dayModalContent').innerHTML = html;
+        showModal('dayModal');
+    } catch (e) { console.error(e); }
+};
+window.toggleTask = async function(id, status) { await db.tasks.update(id, { completed: status }); showDayDetails(currentSelectedDateStr); renderCalendar(); };
+window.addNewEvent = async function() {
+    const t = document.getElementById('newEventTitle').value, d = document.getElementById('newEventDate').value, type = document.getElementById('newEventType').value;
+    if (!t || !d) return;
+    try { if (type === 'task') await db.tasks.add({ description: t, date: d, completed: false }); else await db.events.add({ title: t, date: d, type: 'other' }); document.getElementById('newEventTitle').value = ''; renderCalendar(); } catch (e) { }
+};
+window.addQuickItemToDay = async function() {
+    const t = document.getElementById('quickItemTitle').value, type = document.getElementById('quickItemType').value;
+    if (!t || !currentSelectedDateStr) return;
+    try { if (type === 'task') await db.tasks.add({ description: t, date: currentSelectedDateStr, completed: false }); else await db.events.add({ title: t, date: currentSelectedDateStr, type: 'other' }); document.getElementById('quickItemTitle').value = ''; showDayDetails(currentSelectedDateStr); renderCalendar(); } catch (e) { }
+};
+window.loadUpcomingEvents = async function() {
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        const events = await db.events.where('date').aboveOrEqual(today).toArray();
+        const tasks = await db.tasks.where('date').aboveOrEqual(today).filter(t => !t.completed).toArray();
+        events.sort((a, b) => a.date.localeCompare(b.date)); tasks.sort((a, b) => a.date.localeCompare(b.date));
+        let html = '';
+        for (let e of events) html += `<div class="p-2 mb-2 bg-dark rounded border-start border-success border-4"><span class="text-success small">${e.date}</span><br>${e.title}</div>`;
+        for (let t of tasks) html += `<div class="p-2 mb-2 bg-dark rounded border-start border-warning border-4"><span class="text-warning small">${t.date}</span><br>${t.description}</div>`;
+        document.getElementById('upcomingEventsList').innerHTML = html || '<p class="text-muted">لا يوجد</p>';
+    } catch (e) { }
+};
+
+// ========== 11. ترحيل الجلسة ==========
+window.openRescheduleModal = function(sessionId) {
+    rescheduleSessionId = sessionId;
+    showModal('rescheduleModal');
+};
+window.confirmReschedule = async function() {
+    let newDate = document.getElementById('rescheduleDate').value;
+    let newStatus = document.getElementById('rescheduleStatus').value;
+    if (!newDate) return Swal.fire('تنبيه', 'أدخل التاريخ', 'warning');
+    await db.sessions.update(rescheduleSessionId, { session_date: newDate, case_status: newStatus });
+    await db.pendingOperations.add({ operation: 'update_session', data: { id: rescheduleSessionId, session_date: newDate, case_status: newStatus }, timestamp: Date.now() });
+    hideModal('rescheduleModal');
+    renderCalendar();
+    loadUpcomingSessions('week');
+    Swal.fire('تم الترحيل', '', 'success');
+};
+
+// ========== 12. الأرشيف ==========
+window.loadArchivedCases = async function() {
+    try {
+        const cases = await db.cases.filter(c => c.archived === 1 && c.office_id === currentOfficeId).toArray();
+        let html = '';
+        for (let c of cases) html += `<div class="col-md-4"><div class="case-card" onclick="openCaseDetails('${c.id}')"><h5 class="gold-text mb-1">${c.client_name}</h5><p class="mb-0 text-white-50 small">كود: ${c.case_code}</p><p class="mb-0 text-white-50 mt-2">رقم: ${c.case_number}/${c.case_year}</p><div class="mt-2 d-flex gap-2"><button class="btn btn-sm btn-outline-info flex-grow-1" onclick="event.stopPropagation(); openArchivedCaseFolder('${c.case_code} - ${c.client_name}'.replace(/[<>:"\/\\|?*]/g, '_'))"><i class="bi bi-folder-symlink"></i> فتح المجلد</button><button class="btn btn-sm btn-outline-danger flex-grow-1" onclick="event.stopPropagation(); permanentlyDeleteArchived('${c.id}')"><i class="bi bi-trash"></i> حذف نهائي</button></div></div></div>`;
+        document.getElementById('archivedCasesList').innerHTML = html || '<div class="col-12 text-center text-muted">لا توجد قضايا مؤرشفة</div>';
+    } catch (e) { console.error(e); }
+};
+window.openArchivedCaseFolder = async function(folderName) { if (!ipcRenderer) return Swal.fire('تنبيه', 'متاحة فقط في سطح المكتب', 'info'); try { const res = await ipcRenderer.openCaseFolder(folderName); if (!res.success) Swal.fire('خطأ', res.error, 'error'); } catch (err) { Swal.fire('خطأ', 'فشل فتح المجلد', 'error'); } };
+window.permanentlyDeleteArchived = async function(id) { const caseData = await db.cases.get(id); const confirm = await Swal.fire({ title: 'تأكيد الحذف النهائي', text: `هل أنت متأكد من حذف "${caseData.client_name}" نهائياً؟`, icon: 'warning', showCancelButton: true, confirmButtonColor: '#dc3545', confirmButtonText: 'نعم', cancelButtonText: 'إلغاء', background: '#0f172a', color: '#fff' }); if (confirm.isConfirmed) await deleteCasePermanently(id); loadArchivedCases(); };
+
+// ========== 13. الإحصائيات و PDF ==========
+window.loadStats = async function() { try { const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).toArray(); const sessions = await db.sessions.filter(s => s.office_id === currentOfficeId).toArray(); document.getElementById('stat-cases').innerText = cases.length; document.getElementById('stat-total-s').innerText = sessions.length; document.getElementById('stat-clients').innerText = new Set(cases.map(c => c.client_name)).size; } catch (e) { } };
+window.printCasePDF = function() { if (!currentCaseForPrint) return; const { jsPDF } = window.jspdf; const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' }); doc.setFont('Helvetica', 'normal'); let y = 30, margin = 20; doc.text('نظام إدارة القضايا', doc.internal.pageSize.width / 2, y, { align: 'center' }); y += 15; doc.text(`العميل: ${currentCaseForPrint.client_name}`, margin, y, { align: 'right' }); y += 8; doc.text(`رقم القضية: ${currentCaseForPrint.case_number}/${currentCaseForPrint.case_year}`, margin, y, { align: 'right' }); y += 8; doc.text(`المحكمة: ${currentCaseForPrint.court_name}`, margin, y, { align: 'right' }); y += 8; doc.text(`كود القضية: ${currentCaseForPrint.case_code || ''}`, margin, y, { align: 'right' }); y += 12; doc.text('سجل الجلسات:', margin, y, { align: 'right' }); y += 8; if (currentCaseForPrint.sessions && currentCaseForPrint.sessions.length > 0) { currentCaseForPrint.sessions.forEach(s => { const dateStr = new Date(s.session_date).toLocaleDateString('ar-EG'); doc.text(`${dateStr} - ${s.case_status}`, margin, y, { align: 'right' }); y += 6; if (s.decision) { doc.text(`القرار: ${s.decision}`, margin + 5, y, { align: 'right' }); y += 6; } y += 4; if (y > 280) { doc.addPage(); y = 30; } }); } else { doc.text('لا توجد جلسات مسجلة', margin, y, { align: 'right' }); } doc.save(`قضية_${currentCaseForPrint.case_number}.pdf`); };
+
+// ========== 14. المزامنة مع Supabase ==========
+window.syncWithSupabase = async function() {
+    if (!navigator.onLine) return Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'أنت غير متصل بالإنترنت', background: '#0f172a', color: '#fff' });
+    if (!supabaseClient) await initSupabase();
+    if (!supabaseClient) return Swal.fire('خطأ', 'لم يتم تهيئة اتصال Supabase', 'error');
+    await setSupabaseOfficeId(currentOfficeId);
+    Swal.fire({ title: 'جاري المزامنة...', allowOutsideClick: false, didOpen: () => Swal.showLoading(), background: '#0f172a', color: '#fff' });
+    try {
+        await uploadToSupabase();
+        await downloadFromSupabase();
+        updatePendingBadge();
+        loadStats();
+        loadCasesList();
+        loadUpcomingSessions('week');
+        renderCalendar();
+
+        if (activeCaseId) {
+            const updatedCase = await db.cases.get(activeCaseId);
+            if (updatedCase) {
+                const detailCodeSpan = document.querySelector('#caseDetailContent .text-warning.fw-bold + span');
+                if (detailCodeSpan) detailCodeSpan.innerText = updatedCase.case_code;
+                const modalCodeSpan = document.querySelector('#caseModal .border-warning');
+                if (modalCodeSpan) modalCodeSpan.innerText = updatedCase.case_code;
+            }
+        }
+        Swal.close();
+        Swal.fire({ icon: 'success', title: 'تم', text: 'تمت المزامنة', background: '#0f172a', color: '#fff', showConfirmButton: false, timer: 2000 });
+    } catch (err) { console.error(err); Swal.close(); Swal.fire('خطأ', 'فشلت المزامنة', 'error'); }
+};
+
+async function uploadToSupabase() {
+    const pendingOps = await db.pendingOperations.toArray();
+    for (let op of pendingOps) {
+        try {
+            if (op.operation === 'insert_case') {
+                const { id, ...caseData } = op.data;
+                const { error } = await supabaseClient.from('cases').insert([caseData]).select('case_code');
+                if (!error) {
+                    if (error) console.error('فشل إدراج القضية:', error);
+                } else {
+                    console.error('فشل إدراج القضية:', error);
+                }
+            } else if (op.operation === 'update_case') {
+                const { id, case_code, ...updateData } = op.data;
+                await supabaseClient.from('cases').update(updateData).eq('case_code', case_code);
+            } else if (op.operation === 'delete_case') {
+                await supabaseClient.from('sessions').delete().eq('case_id', op.data.id);
+                await supabaseClient.from('cases').delete().eq('id', op.data.id);
+            } else if (op.operation === 'insert_session') {
+                const sessionData = { ...op.data };
+                await supabaseClient.from('sessions').insert([sessionData]);
+            } else if (op.operation === 'update_session') {
+                const { id, ...updateData } = op.data;
+                await supabaseClient.from('sessions').update(updateData).eq('id', id);
+            } else if (op.operation === 'delete_session') {
+                await supabaseClient.from('sessions').delete().eq('id', op.data.id);
+            }
+            await db.pendingOperations.delete(op.id);
+        } catch (err) { console.error('خطأ في الرفع', err); }
+    }
+}
+
+async function downloadFromSupabase() {
+    const { data: cases, error: casesError } = await supabaseClient.from('cases').select('*').eq('office_id', currentOfficeId);
+    if (casesError) console.error('خطأ في تحميل القضايا:', casesError);
+    if (cases && cases.length > 0) {
+        for (let c of cases) {
+            const existing = await db.cases.get(c.id);
+            if (existing) await db.cases.update(c.id, c);
+            else await db.cases.add(c);
+        }
+    }
+    const { data: sessions, error: sessionsError } = await supabaseClient.from('sessions').select('*').eq('office_id', currentOfficeId);
+    if (sessionsError) console.error('خطأ في تحميل الجلسات:', sessionsError);
+    if (sessions && sessions.length > 0) {
+        for (let s of sessions) {
+            const existing = await db.sessions.get(s.id);
+            if (existing) await db.sessions.update(s.id, s);
+            else await db.sessions.add(s);
+        }
+    }
+}
+
+// ========== 15. الأتعاب ==========
+window.openFeesModal = async function(caseId) { if (!caseId) return; activeCaseId = caseId; hideModal('caseModal'); document.getElementById('payDate').value = new Date().toISOString().split('T')[0]; document.getElementById('payAmount').value = ''; let fee = await db.fees.get(caseId); if (!fee) { fee = { case_id: caseId, total: 0, paid: 0, remaining: 0, notes: '' }; await db.fees.put(fee); } const payments = await db.payments.where('case_id').equals(caseId).toArray(); const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount), 0); const remaining = fee.total - totalPaid; if (fee.paid !== totalPaid || fee.remaining !== remaining) { fee.paid = totalPaid; fee.remaining = remaining; await db.fees.put(fee); } document.getElementById('feeTotalInput').value = fee.total; document.getElementById('feePaidVal').innerText = fee.paid; document.getElementById('feeRemVal').innerText = fee.remaining; document.getElementById('feeGeneralNotes').value = fee.notes || ''; payments.sort((a, b) => new Date(b.date) - new Date(a.date)); let pHtml = ''; for (let p of payments) pHtml += `<div class="d-flex justify-content-between align-items-center border-bottom border-secondary py-2 px-1 text-white"><div><span class="text-info fs-6 fw-bold">${new Date(p.date).toLocaleDateString('ar-EG')}</span><span class="ms-3 text-white-50">${p.note || ''}</span></div><div class="d-flex align-items-center"><strong class="text-success fs-5 ms-3">${p.amount} ج.م</strong><button class="btn btn-sm btn-outline-danger ms-3" onclick="deletePayment(${p.id})"><i class="bi bi-trash"></i></button></div></div>`; document.getElementById('paymentsHistoryList').innerHTML = pHtml || '<div class="text-muted text-center py-4">لا توجد دفعات</div>'; showModal('feesModal'); };
+window.updateTotalFee = async function() { const newTotal = parseFloat(document.getElementById('feeTotalInput').value) || 0; let fee = await db.fees.get(activeCaseId); if (fee) { fee.total = newTotal; fee.remaining = newTotal - fee.paid; await db.fees.put(fee); document.getElementById('feeRemVal').innerText = fee.remaining; } };
+window.updateFeeNotes = async function() { const notes = document.getElementById('feeGeneralNotes').value; let fee = await db.fees.get(activeCaseId); if (fee) { fee.notes = notes; await db.fees.put(fee); } };
+window.addPayment = async function() { if (!activeCaseId) return; const amount = parseFloat(document.getElementById('payAmount').value); const date = document.getElementById('payDate').value; const note = document.getElementById('payNote').value; if (!amount || amount <= 0 || !date) return Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'أدخل مبلغاً وتاريخاً', background: '#0f172a' }); await db.payments.add({ case_id: activeCaseId, amount, date, note }); openFeesModal(activeCaseId); };
+window.deletePayment = async function(paymentId) { if (confirm('هل أنت متأكد؟')) { await db.payments.delete(paymentId); openFeesModal(activeCaseId); } };
+window.printFeesPDF = async function() { if (!activeCaseId) return; const c = await db.cases.get(activeCaseId); const fee = await db.fees.get(activeCaseId); const payments = await db.payments.where('case_id').equals(activeCaseId).toArray(); const { jsPDF } = window.jspdf; const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a5' }); let y = 20, margin = 15; doc.setFontSize(18); doc.text('تقرير وكشف حساب أتعاب', doc.internal.pageSize.width / 2, y, { align: 'center' }); y += 15; doc.setFontSize(12); doc.text(`العميل: ${c.client_name}`, margin, y, { align: 'right' }); y += 8; doc.text(`رقم القضية: ${c.case_number}/${c.case_year}`, margin, y, { align: 'right' }); y += 8; doc.text(`كود القضية: ${c.case_code || ''}`, margin, y, { align: 'right' }); y += 15; doc.setFontSize(14); doc.text(`إجمالي المتفق عليه: ${fee.total} ج.م`, margin, y, { align: 'right' }); y += 8; doc.text(`إجمالي المدفوع: ${fee.paid} ج.م`, margin, y, { align: 'right' }); y += 8; doc.text(`المبلغ المتبقي: ${fee.remaining} ج.م`, margin, y, { align: 'right' }); y += 15; doc.setFontSize(12); doc.text('سجل الدفعات والأقساط:', margin, y, { align: 'right' }); y += 8; payments.sort((a, b) => new Date(a.date) - new Date(b.date)); if (payments.length > 0) { payments.forEach((p, index) => { const dateStr = new Date(p.date).toLocaleDateString('ar-EG'); doc.text(`${index + 1}- [${dateStr}] : ${p.amount} ج.م   (${p.note || ''})`, margin, y, { align: 'right' }); y += 8; if (y > 190) { doc.addPage(); y = 20; } }); } else { doc.text('لا توجد دفعات مسجلة', margin, y, { align: 'right' }); } if (fee.notes) { y += 10; doc.text(`ملاحظات: ${fee.notes}`, margin, y, { align: 'right' }); } doc.save(`أتعاب_${c.case_code || c.case_number}.pdf`); };
+
+// ========== 16. حذف القضية وأرشفتها ==========
+window.showCaseOptions = async function() { if (!activeCaseId) return; const caseData = await db.cases.get(activeCaseId); const result = await Swal.fire({ title: 'خيارات القضية', html: `ماذا تريد أن تفعل بالقضية: <strong>${caseData.client_name}</strong>؟`, icon: 'question', showCancelButton: true, showDenyButton: true, confirmButtonColor: '#dc3545', denyButtonColor: '#ffc107', cancelButtonColor: '#6c757d', confirmButtonText: '🗑️ حذف نهائي', denyButtonText: '📦 نقل إلى الأرشيف', cancelButtonText: 'إلغاء', background: '#0f172a', color: '#fff' }); if (result.isConfirmed) await deleteCasePermanently(activeCaseId); else if (result.isDenied) await archiveCase(activeCaseId); };
+window.archiveCase = async function(id) { try { const caseData = await db.cases.get(id); if (ipcRenderer && ipcRenderer.archiveCaseFolder) { const folderName = `${caseData.case_code} - ${caseData.client_name}`.replace(/[<>:"\/\\|?*]/g, '_'); await ipcRenderer.archiveCaseFolder(folderName); } await db.cases.update(id, { archived: 1 }); await db.pendingOperations.add({ operation: 'update_case', data: { id: id, case_code: caseData.case_code, archived: 1 }, timestamp: Date.now() }); hideModal('caseModal'); Swal.fire({ icon: 'success', title: 'تم الأرشفة', text: 'تم نقل القضية إلى الأرشيف', background: '#0f172a', color: '#fff', timer: 1500, showConfirmButton: false }); loadRecentCases(); updatePendingBadge(); } catch (error) { console.error(error); Swal.fire({ icon: 'error', title: 'خطأ', text: 'فشلت عملية الأرشفة', background: '#0f172a', color: '#fff' }); } };
+window.deleteCasePermanently = async function(id) { try { const caseData = await db.cases.get(id); if (ipcRenderer && ipcRenderer.deleteCaseFolder) { const folderName = `${caseData.case_code} - ${caseData.client_name}`.replace(/[<>:"\/\\|?*]/g, '_'); await ipcRenderer.deleteCaseFolder(folderName); } await db.cases.delete(id); await db.sessions.where('case_id').equals(id).delete(); await db.fees.delete(id); await db.payments.where('case_id').equals(id).delete(); await db.pendingOperations.add({ operation: 'delete_case', data: { id: id }, timestamp: Date.now() }); hideModal('caseModal'); Swal.fire({ icon: 'success', title: 'تم الحذف', text: 'تم حذف القضية نهائياً', background: '#0f172a', color: '#fff', showConfirmButton: false, timer: 2000 }); loadRecentCases(); updatePendingBadge(); } catch (error) { console.error(error); Swal.fire({ icon: 'error', title: 'خطأ', text: 'حدث خطأ أثناء الحذف', background: '#0f172a', color: '#fff' }); } };
+
+// ========== 17. دوال إضافية ==========
+async function loadRecentCases() {
+    try {
+        const container = document.getElementById('recentCasesList');
+        if (!container) return;
+        const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).reverse().limit(12).toArray();
+        let html = '';
+        for (let c of cases) {
+            html += `<div class="case-card mb-2" onclick="openCaseDetails('${c.id}')">
+            <div class="d-flex justify-content-between">
+            <h6 class="gold-text mb-1">${c.client_name}</h6>
+            </div>
+            <div class="small text-white-50">رقم: ${c.case_number}/${c.case_year} | كود: ${c.case_code || 'غير محدد'}</div>
+            </div>`;
+        }
+        container.innerHTML = html || '<p class="text-muted">لا توجد قضايا</p>';
+    } catch (e) { console.error(e); }
+}
+window.searchCases = async function() { const q = document.getElementById('searchInput').value.trim().toLowerCase(); if (!q) return; try { const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).filter(c => String(c.client_name || '').toLowerCase().includes(q) || String(c.case_number || '').includes(q) || String(c.client_phone || '').includes(q) || String(c.case_code || '').toLowerCase().includes(q)).toArray(); let html = ''; for (let c of cases) { const sessions = await db.sessions.where('case_id').equals(c.id).toArray(); sessions.sort((a, b) => new Date(b.session_date) - new Date(a.session_date)); const lastStatus = sessions.length > 0 ? sessions[0].case_status : 'جديدة'; html += `<div class="col-md-4"><div class="case-card" onclick="openCaseDetails('${c.id}')"><div class="d-flex justify-content-between align-items-start"><div><h5 class="gold-text mb-1">${c.client_name}</h5><p class="mb-0 text-white-50 small">كود: ${c.case_code}</p></div><span class="case-status status-new">${lastStatus}</span></div><p class="mb-0 text-white-50 mt-2">رقم: ${c.case_number}/${c.case_year}</p></div></div>`; } document.getElementById('searchResults').innerHTML = html || '<div class="col-12 text-center text-muted">لا توجد نتائج</div>'; } catch (e) { } };
+window.openCaseDetails = async function(id) { if (!id) return; try { const c = await db.cases.get(id); if (!c) return; activeCaseId = id; document.getElementById('caseDetailsContent').innerHTML = `<div class="d-flex justify-content-between align-items-center mb-3"><div><span class="client-name-large">${c.client_name}</span><span class="role-badge me-3">${c.client_role || 'صفة غير محددة'}</span></div><span class="fs-5 text-warning fw-bold border border-warning px-3 py-1 rounded bg-dark">${c.case_code || '-'}</span></div><div class="row mt-3 text-white fs-5"><div class="col-6 mb-3"><strong>رقم القضية:</strong> <span class="text-light">${c.case_number} / ${c.case_year}</span></div><div class="col-6 mb-3"><strong>المحكمة/الدائرة:</strong> <span class="text-light">${c.court_name || ''} ${c.circuit ? '- الدائرة ' + c.circuit : ''}</span></div><div class="col-6 mb-3"><strong>نوع القضية:</strong> <span class="text-light">${c.case_type || 'غير محدد'}</span></div><div class="col-6 mb-3"><strong>الخصم:</strong> <span class="text-light">${c.opponent_name || '-'}</span></div><div class="col-6 mb-3"><strong>الهاتف:</strong> <span class="text-light">${c.client_phone || '-'}</span></div><div class="col-12 mt-2"><strong>الموضوع:</strong> <br><span class="text-light">${c.case_subject || '-'}</span></div></div>`; const sessions = await db.sessions.where('case_id').equals(id).toArray(); sessions.sort((a, b) => new Date(b.session_date) - new Date(a.session_date)); currentCaseForPrint = { ...c, sessions: sessions }; let sHtml = ''; if (sessions.length > 0) { for (let s of sessions) { sHtml += `<div class="session-item-row"><div><span class="text-info fw-bold fs-5">${new Date(s.session_date).toLocaleString('ar-EG', { dateStyle: 'full', timeStyle: 'short' })}</span><span class="badge bg-light text-dark mx-3 fs-6">${s.case_status}</span><div class="fs-6 mt-2 text-white">${s.decision || 'لا يوجد قرار مسجل'}</div></div><button class="btn btn-sm btn-outline-warning" onclick="event.stopPropagation(); openEditSession('${s.id}')"><i class="bi bi-pencil fs-5"></i></button></div>`; } } else { sHtml = '<p class="text-muted">لا توجد جلسات مسجلة لهذه القضية.</p>'; } document.getElementById('caseSessionsContent').innerHTML = sHtml; document.getElementById('modalActionButtons').innerHTML = `${ipcRenderer && ipcRenderer.createCaseFolder ? '<button class="btn btn-info" onclick="handleOpenCaseFolder()"><i class="bi bi-folder-fill"></i> مجلد</button>' : ''}<button class="btn btn-success" onclick="openFeesModal(activeCaseId)"><i class="bi bi-cash-coin"></i> الأتعاب</button><button class="btn btn-outline-warning" onclick="openEditCaseModalFromPanel()"><i class="bi bi-pencil"></i> تعديل</button><button class="btn btn-danger" onclick="showCaseOptions()"><i class="bi bi-archive"></i> حذف / أرشفة</button>`; showModal('caseModal'); } catch (e) { console.error(e); } };
+window.handleOpenCaseFolder = async function() { if (!activeCaseId || !ipcRenderer) return; try { const c = await db.cases.get(activeCaseId); const folderName = `${c.case_code} - ${c.client_name}`.replace(/[<>:"\/\\|?*]/g, '_'); const res = await ipcRenderer.openCaseFolder(folderName); if (!res || !res.success) { if (ipcRenderer.createCaseFolder) { await ipcRenderer.createCaseFolder(c.case_code, c.client_name, c); await ipcRenderer.openCaseFolder(folderName); } } } catch (err) { } };
+window.saveEditedCase = async function() { const updated = { client_name: document.getElementById('edit_c_name').value, client_phone: document.getElementById('edit_c_phone').value, opponent_name: document.getElementById('edit_c_opponent').value, case_number: document.getElementById('edit_c_num').value, case_year: document.getElementById('edit_c_year').value, court_name: document.getElementById('edit_c_court').value, circuit: document.getElementById('edit_c_circuit').value, case_type: document.getElementById('edit_case_type').value, case_subject: document.getElementById('edit_c_subject').value }; const currentCase = await db.cases.get(activeCaseId); await db.cases.update(activeCaseId, updated); await db.pendingOperations.add({ operation: 'update_case', data: { id: activeCaseId, case_code: currentCase.case_code, ...updated }, timestamp: Date.now() }); hideModal('editCaseModal'); openCaseDetails(activeCaseId); Swal.fire({ icon: 'success', title: 'تم التعديل محلياً', timer: 1000, showConfirmButton: false, background: '#0f172a' }); updatePendingBadge(); };
+window.calculateDate = function() { const startDate = document.getElementById('calcStartDate').value; if (!startDate) return Swal.fire('تنبيه', 'الرجاء اختيار تاريخ البداية', 'warning'); const days = parseInt(document.getElementById('calcDays').value) || 0; const date = new Date(startDate); date.setDate(date.getDate() + days); const resultStr = date.toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' }); document.getElementById('calcResult').innerText = resultStr; window.calculatedDate = date; };
+window.addCalculatedDateAsEvent = function() { if (!window.calculatedDate) return Swal.fire('تنبيه', 'قم بحساب التاريخ أولاً', 'warning'); const dateStr = window.calculatedDate.toISOString().split('T')[0]; const title = prompt('أدخل وصف الحدث:', 'موعد قانوني'); if (title) { db.events.add({ title, date: dateStr, type: 'legal' }); renderCalendar(); Swal.fire('تم', 'تم إضافة الحدث', 'success'); } };
+window.addCalculatedDateAsTask = function() { if (!window.calculatedDate) return Swal.fire('تنبيه', 'قم بحساب التاريخ أولاً', 'warning'); const dateStr = window.calculatedDate.toISOString().split('T')[0]; const desc = prompt('أدخل وصف المهمة:', 'مهمة قانونية'); if (desc) { db.tasks.add({ description: desc, date: dateStr, completed: false }); renderCalendar(); Swal.fire('تم', 'تم إضافة المهمة', 'success'); } };
+
+// ========== 18. إعادة تعيين التطبيق ==========
+window.resetApp = async function() {
+    const result = await Swal.fire({
+        title: 'تأكيد إعادة التعيين',
+        text: 'سيتم حذف جميع البيانات المحلية (القضايا، الجلسات، إعدادات المكتب) وإعادة تشغيل التطبيق. هل أنت متأكد؟',
+                                   icon: 'warning',
+                                   showCancelButton: true,
+                                   confirmButtonColor: '#dc3545',
+                                   confirmButtonText: 'نعم، احذف',
+                                   cancelButtonText: 'إلغاء',
+                                   background: '#0f172a',
+                                   color: '#fff'
+    });
+    if (result.isConfirmed) {
+        try {
+            await db.delete();
+            localStorage.clear();
+            sessionStorage.clear();
+            Swal.fire({ icon: 'success', title: 'تم المسح', text: 'سيتم إعادة تشغيل التطبيق الآن', timer: 1500, showConfirmButton: false })
+            .then(() => location.reload());
+        } catch (err) { Swal.fire('خطأ', 'حدث خطأ أثناء محاولة مسح البيانات', 'error'); }
+    }
+};
+
+// ========== 19. التهيئة النهائية ==========
+document.addEventListener('DOMContentLoaded', async () => {
+    const nextWeek = new Date(); nextWeek.setDate(nextWeek.getDate() + 7);
+    if (document.getElementById('s_date')) document.getElementById('s_date').value = nextWeek.toISOString().slice(0, 16);
+    if (document.getElementById('newEventDate')) document.getElementById('newEventDate').value = new Date().toISOString().split('T')[0];
+    if (document.getElementById('calcStartDate')) document.getElementById('calcStartDate').value = new Date().toISOString().split('T')[0];
+    await renderCalendar();
+    bindManualTabs();
+    document.querySelectorAll('.tab-pane').forEach(pane => { pane.style.display = 'none'; });
+    await initSupabase();
+    const hasOffice = await checkOfficeSetup();
+    if (!hasOffice) showLicenseModal();
+});
+
+// ========== 20. مودال الإعدادات (إضافة هذه الدالة في النهاية) ==========
+window.showSettingsModal = function() {
+    showModal('settingsModal');
+};

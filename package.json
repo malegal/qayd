@@ -1,0 +1,67 @@
+{
+  "name": "qayed-law-office",
+  "version": "1.0.0",
+  "description": "نظام إدارة قضايا المحاماة - قيد",
+  "main": "main.js",
+  "homepage": "https://example.com",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:linux": "electron-builder --linux",
+    "dist:win": "electron-builder --win",
+    "dist:all": "electron-builder --linux --win"
+  },
+  "author": {
+    "name": "اسم المطور",
+    "email": "developer@example.com"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "dexie": "^3.2.4",
+    "sweetalert2": "^11.10.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.5.0",
+    "electron": "^27.0.0",
+    "electron-builder": "^26.8.1",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^4.3.1"
+  },
+  "build": {
+    "appId": "com.qayed.law",
+    "productName": "قيد",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!node_modules/*/test",
+      "!node_modules/*/tests",
+      "!node_modules/*/example",
+      "!node_modules/*/examples"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icons/icon.ico",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "deb",
+        "AppImage"
+      ],
+      "category": "Office",
+      "icon": "icons/icon.png",
+      "synopsis": "قيد - نظام إدارة قضايا المحاماة",
+      "description": "تطبيق متكامل لإدارة القضايا والجلسات والأتعاب للمحامين",
+      "maintainer": "المطور <developer@example.com>"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
