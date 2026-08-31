@@ -819,28 +819,38 @@ async function uploadToSupabase() {
             if (op.operation === 'insert_case') {
                 const { id, ...caseData } = op.data;
                 const { error } = await supabaseClient.from('cases').insert([caseData]).select('case_code');
-                if (!error) {
-                    if (error) console.error('فشل إدراج القضية:', error);
-                } else {
-                    console.error('فشل إدراج القضية:', error);
-                }
+                if (error) throw error;
             } else if (op.operation === 'update_case') {
                 const { id, case_code, ...updateData } = op.data;
-                await supabaseClient.from('cases').update(updateData).eq('case_code', case_code);
+                const { error } = await supabaseClient.from('cases').update(updateData).eq('case_code', case_code);
+                if (error) throw error;
             } else if (op.operation === 'delete_case') {
-                await supabaseClient.from('sessions').delete().eq('case_id', op.data.id);
-                await supabaseClient.from('cases').delete().eq('id', op.data.id);
+                const { error: sessionsError } = await supabaseClient.from('sessions').delete().eq('case_id', op.data.id);
+                if (sessionsError) throw sessionsError;
+                const { error: caseError } = await supabaseClient.from('cases').delete().eq('id', op.data.id);
+                if (caseError) throw caseError;
             } else if (op.operation === 'insert_session') {
                 const sessionData = { ...op.data };
-                await supabaseClient.from('sessions').insert([sessionData]);
+                const { error } = await supabaseClient.from('sessions').insert([sessionData]);
+                if (error) throw error;
             } else if (op.operation === 'update_session') {
                 const { id, ...updateData } = op.data;
-                await supabaseClient.from('sessions').update(updateData).eq('id', id);
+                const { error } = await supabaseClient.from('sessions').update(updateData).eq('id', id);
+                if (error) throw error;
             } else if (op.operation === 'delete_session') {
-                await supabaseClient.from('sessions').delete().eq('id', op.data.id);
+                const { error } = await supabaseClient.from('sessions').delete().eq('id', op.data.id);
+                if (error) throw error;
+            } else {
+                // العمليات غير المعروفة تبقى في الطابور حتى يراجعها المطور بدل فقدانها بصمت.
+                throw new Error(`عملية مزامنة غير معروفة: ${op.operation}`);
             }
+
+            // لا نحذف العملية إلا بعد نجاح Supabase؛ عند الفشل يعيد الطابور المحاولة لاحقًا.
             await db.pendingOperations.delete(op.id);
-        } catch (err) { console.error('خطأ في الرفع', err); }
+        } catch (err) {
+            // الاحتفاظ بالعملية الفاشلة يحمي بيانات المكتب من الفقدان عند انقطاع الشبكة أو رفض الطلب.
+            console.error('خطأ في الرفع، ستبقى العملية معلقة للمحاولة التالية:', err);
+        }
     }
 }
 
