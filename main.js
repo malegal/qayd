@@ -4,8 +4,9 @@ const fs = require('fs');
 
 let mainWindow;
 
-const SUPABASE_URL = "https://llcnpgokoaqqdmxjbkol.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxsY25wZ29rb2FxcWRteGpia29sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwNTk0NzgsImV4cCI6MjA5MjYzNTQ3OH0._JTy-yr4rv4OxvaD0w_D12hSTMqLCLN2xBdHpcs3L4E";
+// يجب أن يستخدم تطبيق qayd نفس مشروع Supabase الثابت الذي يقرأ منه موقع ostazlaw وصفحة «تابع قضيتك».
+const SUPABASE_URL = "https://mgvyieyismzzvdejsvcv.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ndnlpZXlpc216enZkZWpzdmN2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1NDI2NTMsImV4cCI6MjA5OTExODY1M30.xE-K83Ku3ei3GlFkwKivtBzGMDyK60R6MnYr2eEFz-I";
 
 process.on('uncaughtException', (error) => {
     console.error('❌ خطأ غير متوقع:', error);
