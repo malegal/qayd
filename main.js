@@ -40,6 +40,13 @@ app.on('window-all-closed', () => {
 // ========== دوال المجلدات والقوالب (كما هي) ==========
 ipcMain.handle('create-case-folder', async (event, caseCode, clientName, caseData) => {
     try {
+        // حماية المستوى الرئيسي: لا يُنشأ مجلد أو ملف قضية خارج صيغة كود qayd المعتمدة.
+        if (typeof caseCode !== 'string' || !/^JELR-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}$/.test(caseCode.trim())) {
+            return { success: false, error: 'لا يمكن إنشاء مجلد بدون case_code صالح من qayd' };
+        }
+        if (!caseData || caseData.case_code !== caseCode.trim()) {
+            return { success: false, error: 'بيانات المجلد لا تطابق case_code المرسل' };
+        }
         const docsPath = app.getPath('documents');
         const baseDir = path.join(docsPath, 'مكتب المحامي', 'القضايا');
         const folderName = `${caseCode} - ${clientName}`.replace(/[<>:"\/\\|?*]/g, '_');
@@ -123,6 +130,40 @@ ipcMain.handle('open-notes', async (event, folderName) => {
         await shell.openPath(notesPath);
         return { success: true };
     } catch (err) { return { error: err.message }; }
+});
+
+// حماية مجلدات الخدمات المهنية: لا يُنشأ مجلد إلا بكود RE أو CO أو AD صالح.
+ipcMain.handle('create-professional-file-folder', async (event, fileCode, clientName, fileType, fileData) => {
+    try {
+        if (typeof fileCode !== 'string' || !/^(RE|CO|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(fileCode.trim())) {
+            return { success: false, error: 'لا يمكن إنشاء مجلد خدمة مهنية بدون كود صالح' };
+        }
+        if (!fileData || fileData.file_code !== fileCode.trim()) {
+            return { success: false, error: 'بيانات المجلد لا تطابق كود الملف' };
+        }
+        const folders = { real_estate: 'الشهر العقاري', company_formation: 'إنشاء الشركات', administrative: 'خدمات إدارية' };
+        const category = folders[fileType] || folders.administrative;
+        const docsPath = app.getPath('documents');
+        const baseDir = path.join(docsPath, 'مكتب المحامي', 'الخدمات', category);
+        const folderName = `${fileCode} - ${clientName}`.replace(/[<>:"/\\|?*]/g, '_');
+        const folderPath = path.join(baseDir, folderName);
+        fs.mkdirSync(path.join(folderPath, 'مستندات العميل'), { recursive: true });
+        fs.mkdirSync(path.join(folderPath, 'نماذج المكتب'), { recursive: true });
+        fs.mkdirSync(path.join(folderPath, 'نسخ نهائية'), { recursive: true });
+        fs.writeFileSync(path.join(folderPath, 'بيانات_الملف.json'), JSON.stringify(fileData, null, 2));
+        return { success: true, path: folderPath };
+    } catch (err) { return { success: false, error: err.message }; }
+});
+
+ipcMain.handle('open-professional-file-folder', async (event, fileCode, clientName, fileType) => {
+    try {
+        if (typeof fileCode !== 'string' || !/^(RE|CO|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(fileCode.trim())) return { success: false, error: 'كود غير صالح' };
+        const folders = { real_estate: 'الشهر العقاري', company_formation: 'إنشاء الشركات', administrative: 'خدمات إدارية' };
+        const folderPath = path.join(app.getPath('documents'), 'مكتب المحامي', 'الخدمات', folders[fileType] || folders.administrative, `${fileCode} - ${clientName}`.replace(/[<>:"/\\|?*]/g, '_'));
+        if (!fs.existsSync(folderPath)) return { success: false, error: 'المجلد غير موجود' };
+        await shell.openPath(folderPath);
+        return { success: true };
+    } catch (err) { return { success: false, error: err.message }; }
 });
 
 ipcMain.on('show-notification', (event, title, body) => { new Notification({ title, body }).show(); });

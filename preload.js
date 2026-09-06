@@ -6,6 +6,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
                                 openCaseFolder: (folderName) => ipcRenderer.invoke('open-case-folder', folderName),
                                 archiveCaseFolder: (folderName) => ipcRenderer.invoke('archive-case-folder', folderName),
                                 deleteCaseFolder: (folderName) => ipcRenderer.invoke('delete-case-folder', folderName),
+  // مجلدات الملفات المهنية منفصلة عن مجلدات القضايا القضائية.
+  createProfessionalFileFolder: (fileCode, clientName, fileType, fileData) => ipcRenderer.invoke('create-professional-file-folder', fileCode, clientName, fileType, fileData),
+  openProfessionalFileFolder: (fileCode, clientName, fileType) => ipcRenderer.invoke('open-professional-file-folder', fileCode, clientName, fileType),
                                 saveFeesCSV: (folderName, csvContent) => ipcRenderer.invoke('save-fees-csv', folderName, csvContent),
                                 showNotification: (title, body) => ipcRenderer.send('show-notification', title, body),
                                 selectFile: () => ipcRenderer.invoke('select-file'),

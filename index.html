@@ -134,6 +134,9 @@
         <div class="nav flex-column nav-pills" role="tablist">
             <button class="nav-link active" id="agenda-tab" data-bs-target="#agendaTab" type="button" role="tab" onclick="renderCalendar()"><i class="bi bi-calendar3 fs-5"></i> الأجندة</button>
             <button class="nav-link" id="cases-tab" data-bs-target="#cases" type="button" role="tab" onclick="loadCasesList()"><i class="bi bi-briefcase fs-5"></i> القضايا</button>
+            <!-- خدمات المكتب غير القضائية تُدار منفصلة عن القضايا مع كود متابعة مستقل. -->
+            <button class="nav-link" type="button" onclick="openProfessionalFilesPanel()"><i class="bi bi-folder2-open fs-5"></i> الملفات المهنية</button>
+            <button class="nav-link" type="button" onclick="openProfessionalFileModal()"><i class="bi bi-plus-circle fs-5"></i> ملف مهني جديد</button>
             <button class="nav-link" id="sessions-tab" data-bs-target="#sessions" type="button" role="tab"><i class="bi bi-calendar-event fs-5"></i> الجلسات</button>
             <button class="nav-link" id="archive-tab" data-bs-target="#archiveTab" type="button" role="tab" onclick="loadArchivedCases()"><i class="bi bi-archive fs-5"></i> الأرشيف</button>
             <button class="nav-link" id="search-tab" data-bs-target="#searchTab" type="button" role="tab" onclick="loadStats()"><i class="bi bi-search fs-5"></i> بحث وتقارير</button>
@@ -493,6 +496,29 @@
     </div>
 </div>
 
+<!-- واجهة الملفات المهنية: منفصلة عن واجهة القضايا القضائية مع تجربة استخدام موحدة. -->
+<div class="modal fade" id="professionalFileModal" tabindex="-1">
+  <div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title gold-text"><i class="bi bi-briefcase"></i> إنشاء ملف خدمة مهنية</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body text-white"><div class="row g-3">
+      <div class="col-md-6"><label class="form-label">نوع الخدمة</label><select id="professionalFileType" class="form-select"><option value="real_estate">تسجيل عقار - الشهر العقاري</option><option value="company_formation">إنشاء شركة</option><option value="administrative">خدمة مهنية إدارية</option></select></div>
+      <div class="col-md-6"><label class="form-label">اسم الملف</label><input id="professionalFileTitle" class="form-control" placeholder="مثال: تسجيل شقة في الشهر العقاري"></div>
+      <div class="col-md-6"><label class="form-label">اسم العميل</label><input id="professionalClientName" class="form-control"></div>
+      <div class="col-md-6"><label class="form-label">هاتف العميل</label><input id="professionalClientPhone" class="form-control" inputmode="tel"></div>
+      <div class="col-12"><label class="form-label">وصف الخدمة</label><textarea id="professionalFileDescription" class="form-control" rows="3"></textarea></div>
+    </div></div>
+    <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button><button class="gold-btn" onclick="saveProfessionalFile()">إنشاء الملف وتوليد الكود</button></div>
+  </div></div>
+</div>
+<div class="modal fade" id="professionalFilesModal" tabindex="-1">
+  <div class="modal-dialog modal-xl"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title gold-text"><i class="bi bi-folder2-open"></i> الملفات المهنية</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body"><div class="d-flex justify-content-between align-items-center mb-3"><p class="text-white-50 mb-0">ملفات الشهر العقاري والشركات والخدمات الإدارية.</p><button class="gold-btn" onclick="hideModal('professionalFilesModal'); openProfessionalFileModal()"><i class="bi bi-plus"></i> ملف جديد</button></div><div id="professionalFilesList" class="professional-files-list"></div></div>
+  </div></div>
+</div>
+<style>
+.professional-files-list { display:grid; gap:.65rem; }.professional-file-row { display:grid; grid-template-columns:1fr auto auto; gap:1rem; align-items:center; padding:.85rem 1rem; border:1px solid rgba(212,175,55,.25); border-radius:10px; background:rgba(15,23,42,.75); color:#fff; }.professional-code { color:#e5c56a; font-weight:700; letter-spacing:.04em; font-size:.85rem; }@media(max-width:640px){.professional-file-row{grid-template-columns:1fr;gap:.35rem;}}
+</style>
 <script src="renderer.js"></script>
 </body>
 </html>
