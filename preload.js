@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
                                 saveFeesCSV: (folderName, csvContent) => ipcRenderer.invoke('save-fees-csv', folderName, csvContent),
                                 showNotification: (title, body) => ipcRenderer.send('show-notification', title, body),
                                 selectFile: () => ipcRenderer.invoke('select-file'),
+                                copyReceipt: (sourcePath, recordId) => ipcRenderer.invoke('copy-receipt', sourcePath, recordId),
+                                openLocalFile: (filePath) => ipcRenderer.invoke('open-local-file', filePath),
                                 openTemplate: (folderName, templateName) => ipcRenderer.invoke('open-template', folderName, templateName),
                                 openNotes: (folderName) => ipcRenderer.invoke('open-notes', folderName),
                                 // Supabase keys

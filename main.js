@@ -166,6 +166,30 @@ ipcMain.handle('open-professional-file-folder', async (event, fileCode, clientNa
     } catch (err) { return { success: false, error: err.message }; }
 });
 
+
+
+ipcMain.handle('select-file', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, { properties: ['openFile'], filters: [{ name: 'صور ومستندات', extensions: ['jpg', 'jpeg', 'png', 'webp', 'pdf'] }] });
+    return result.canceled ? null : result.filePaths[0];
+});
+ipcMain.handle('copy-receipt', async (event, sourcePath, recordId) => {
+    try {
+        if (!sourcePath || !recordId || !fs.existsSync(sourcePath)) return { success: false, error: 'ملف الإيصال غير موجود' };
+        const safeId = String(recordId).replace(/[^a-zA-Z0-9_-]/g, '_');
+        const dir = path.join(app.getPath('documents'), 'مكتب المحامي', 'المرفقات المالية', safeId);
+        fs.mkdirSync(dir, { recursive: true });
+        const ext = path.extname(sourcePath).toLowerCase() || '.dat';
+        const target = path.join(dir, `إيصال_${Date.now()}${ext}`);
+        fs.copyFileSync(sourcePath, target);
+        return { success: true, path: target, name: path.basename(target) };
+    } catch (err) { return { success: false, error: err.message }; }
+});
+ipcMain.handle('open-local-file', async (event, filePath) => {
+    try { return { success: true, error: await shell.openPath(filePath) }; } catch (err) { return { success: false, error: err.message }; }
+});
+
+
+
 ipcMain.on('show-notification', (event, title, body) => { new Notification({ title, body }).show(); });
 
 ipcMain.handle('get-supabase-keys', () => {
