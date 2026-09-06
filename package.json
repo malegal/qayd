@@ -53,7 +53,7 @@
         "AppImage"
       ],
       "category": "Office",
-      "icon": "icons/icon.png",
+      "icon": "icons/linux",
       "synopsis": "قيد - نظام إدارة قضايا المحاماة",
       "description": "تطبيق متكامل لإدارة القضايا والجلسات والأتعاب للمحامين",
       "maintainer": "المطور <developer@example.com>"
