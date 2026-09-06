@@ -15,13 +15,31 @@ create table if not exists public.office_files (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint office_files_code_not_blank check (btrim(file_code) <> ''),
-  constraint office_files_code_format check (file_code ~ '^(RE|CO|AD)-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}$'),
-  constraint office_files_type_check check (file_type in ('real_estate', 'company_formation', 'administrative')),
+  constraint office_files_code_format check (file_code ~ '^(RE|CT|CO|PI|DR|AD)-[0-9]{2}-(?:[0-9]{4}|[0-9]{6})-[A-Z0-9]{6}$'),
+  constraint office_files_type_check check (file_type in ('real_estate', 'contract_writing', 'company_formation', 'prosecution_investigation', 'detention_renewal', 'administrative')),
   constraint office_files_type_code_check check (
     (file_type = 'real_estate' and file_code like 'RE-%') or
+    (file_type = 'contract_writing' and file_code like 'CT-%') or
     (file_type = 'company_formation' and file_code like 'CO-%') or
+    (file_type = 'prosecution_investigation' and file_code like 'PI-%') or
+    (file_type = 'detention_renewal' and file_code like 'DR-%') or
     (file_type = 'administrative' and file_code like 'AD-%')
   )
+);
+
+-- تحديث قيود الأنواع والأكواد عند تشغيل هذه الترحيلة على قاعدة موجودة.
+alter table if exists public.office_files drop constraint if exists office_files_code_format;
+alter table if exists public.office_files drop constraint if exists office_files_type_check;
+alter table if exists public.office_files drop constraint if exists office_files_type_code_check;
+alter table if exists public.office_files add constraint office_files_code_format check (file_code ~ '^(RE|CT|CO|PI|DR|AD)-[0-9]{2}-(?:[0-9]{4}|[0-9]{6})-[A-Z0-9]{6}$');
+alter table if exists public.office_files add constraint office_files_type_check check (file_type in ('real_estate', 'contract_writing', 'company_formation', 'prosecution_investigation', 'detention_renewal', 'administrative'));
+alter table if exists public.office_files add constraint office_files_type_code_check check (
+  (file_type = 'real_estate' and file_code like 'RE-%') or
+  (file_type = 'contract_writing' and file_code like 'CT-%') or
+  (file_type = 'company_formation' and file_code like 'CO-%') or
+  (file_type = 'prosecution_investigation' and file_code like 'PI-%') or
+  (file_type = 'detention_renewal' and file_code like 'DR-%') or
+  (file_type = 'administrative' and file_code like 'AD-%')
 );
 
 create table if not exists public.file_events (

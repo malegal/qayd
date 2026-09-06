@@ -135,13 +135,13 @@ ipcMain.handle('open-notes', async (event, folderName) => {
 // حماية مجلدات الخدمات المهنية: لا يُنشأ مجلد إلا بكود RE أو CO أو AD صالح.
 ipcMain.handle('create-professional-file-folder', async (event, fileCode, clientName, fileType, fileData) => {
     try {
-        if (typeof fileCode !== 'string' || !/^(RE|CO|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(fileCode.trim())) {
+        if (typeof fileCode !== 'string' || !/^(RE|CT|CO|PI|DR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(fileCode.trim())) {
             return { success: false, error: 'لا يمكن إنشاء مجلد خدمة مهنية بدون كود صالح' };
         }
         if (!fileData || fileData.file_code !== fileCode.trim()) {
             return { success: false, error: 'بيانات المجلد لا تطابق كود الملف' };
         }
-        const folders = { real_estate: 'الشهر العقاري', company_formation: 'إنشاء الشركات', administrative: 'خدمات إدارية' };
+        const folders = { real_estate: 'الشهر العقاري', contract_writing: 'كتابة العقود', company_formation: 'تأسيس الشركات', prosecution_investigation: 'تحقيقات النيابة', detention_renewal: 'تجديد الحبس', administrative: 'خدمات إدارية' };
         const category = folders[fileType] || folders.administrative;
         const docsPath = app.getPath('documents');
         const baseDir = path.join(docsPath, 'مكتب المحامي', 'الخدمات', category);
@@ -157,8 +157,8 @@ ipcMain.handle('create-professional-file-folder', async (event, fileCode, client
 
 ipcMain.handle('open-professional-file-folder', async (event, fileCode, clientName, fileType) => {
     try {
-        if (typeof fileCode !== 'string' || !/^(RE|CO|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(fileCode.trim())) return { success: false, error: 'كود غير صالح' };
-        const folders = { real_estate: 'الشهر العقاري', company_formation: 'إنشاء الشركات', administrative: 'خدمات إدارية' };
+        if (typeof fileCode !== 'string' || !/^(RE|CT|CO|PI|DR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(fileCode.trim())) return { success: false, error: 'كود غير صالح' };
+        const folders = { real_estate: 'الشهر العقاري', contract_writing: 'كتابة العقود', company_formation: 'تأسيس الشركات', prosecution_investigation: 'تحقيقات النيابة', detention_renewal: 'تجديد الحبس', administrative: 'خدمات إدارية' };
         const folderPath = path.join(app.getPath('documents'), 'مكتب المحامي', 'الخدمات', folders[fileType] || folders.administrative, `${fileCode} - ${clientName}`.replace(/[<>:"/\\|?*]/g, '_'));
         if (!fs.existsSync(folderPath)) return { success: false, error: 'المجلد غير موجود' };
         await shell.openPath(folderPath);
