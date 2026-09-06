@@ -120,13 +120,15 @@
 <div id="loginPage">
     <div class="login-box">
         <div class="mb-2"><span style="font-size: 3.5rem; font-weight: 900;" class="gold-text">قيد</span></div>
-        <div class="text-white-50 small mb-4">نظام إدارة قضايا المحاماة</div>
+        <div class="text-white-50 small mb-2">نظام إدارة القضايا والملفات القانونية</div>
+        <div class="small text-white-50 mb-4">عند التثبيت لأول مرة: سجّل بيانات مكتبك، ثم فعّل النسخة التجريبية أو أدخل كود التفعيل.</div>
 
         <div class="mb-3">
             <label class="form-label text-white-50">كلمة المرور السريعة (PIN)</label>
             <input type="password" id="pinInput" class="form-control text-center" maxlength="6" placeholder="••••••" style="font-size: 1.5rem; letter-spacing: 5px;">
         </div>
-        <button class="gold-btn btn w-100 py-3 fs-5" onclick="verifyPin()"><i class="bi bi-box-arrow-in-right me-2"></i> دخول</button>
+        <button class="gold-btn btn w-100 py-3 fs-5" onclick="verifyPin()"><i class="bi bi-box-arrow-in-right me-2"></i> دخول إلى مكتب موجود</button>
+        <button class="btn btn-outline-info w-100 mt-2" onclick="startFirstInstallRegistration()"><i class="bi bi-building-add me-2"></i> تسجيل مكتب جديد</button>
         <div class="mt-3 small text-white-50">
             <a href="#" onclick="showRecoveryModal(); return false;" class="text-warning">استرداد مكتب من جهاز آخر</a>
         </div>
@@ -337,14 +339,15 @@
 <div class="modal fade" id="officeSetupModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog">
         <div class="modal-content">
-            <div class="modal-header"><h5 class="modal-title gold-text">إعداد المكتب</h5></div>
+            <div class="modal-header"><h5 class="modal-title gold-text">الخطوة الأولى: تسجيل المكتب</h5></div>
             <div class="modal-body">
+                <div class="alert alert-info bg-transparent text-info border-info small">ابدأ بتسجيل المكتب. بعد الحفظ ستنتقل إلى خطوة التفعيل: تجربة مجانية أو كود تفعيل.</div>
                 <label>اسم المحامي / المكتب</label>
                 <input type="text" id="officeNameInput" class="form-control" placeholder="مثال: أحمد محمد - مكتب القاهرة" required>
                 <hr>
-                <label>البريد الإلكتروني (اختياري، للاسترداد عند تغيير الجهاز)</label>
+                <label>البريد الإلكتروني (مهم للاسترداد والتفعيل)</label>
                 <input type="email" id="officeEmailInput" class="form-control" placeholder="example@lawfirm.com">
-                <small class="text-muted">لن نرسل رسائل مزعجة، فقط لاستعادة بياناتك إذا غيرت جهازك.</small>
+                <small class="text-muted">يُستخدم لاسترداد المكتب عند تغيير الجهاز واستقبال معلومات التفعيل. لبريد مالك التطبيق تفعيل دائم.</small>
                 <hr>
                 <label>كلمة المرور السريعة (PIN) – للدخول اليومي</label>
                 <input type="password" id="initialPin" class="form-control" maxlength="6" placeholder="4-6 أرقام">
@@ -443,13 +446,13 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title gold-text">تفعيل الترخيص</h5>
+                <h5 class="modal-title gold-text">الخطوة الثانية: تفعيل النسخة</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
                 <div id="licenseModalOptions">
                     <button class="btn btn-success w-100 mb-3" onclick="startFreeTrial()">
-                        <i class="bi bi-gift"></i> تجربة مجانية لمدة 90 يوم
+                        <i class="bi bi-gift"></i> إرسال كود التجربة المجانية (90 يوماً)
                     </button>
                     <hr>
                     <button class="btn btn-outline-warning w-100" onclick="showActivationInput()">
@@ -465,7 +468,7 @@
                     </div>
                 </div>
                 <div id="trialEmailArea" style="display: none;">
-                    <label>البريد الإلكتروني (لإرسال تذكير قبل انتهاء التجربة)</label>
+                    <label>البريد الإلكتروني لاستلام/ربط كود التجربة</label>
                     <input type="email" id="trialEmail" class="form-control" placeholder="example@lawfirm.com">
                     <div class="mt-3 d-flex justify-content-between">
                         <button class="btn btn-secondary" onclick="hideTrialEmail()">رجوع</button>

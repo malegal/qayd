@@ -44,6 +44,32 @@ let currentOfficeName = null;
 let activeCaseId = null, activeSessionId = null, currentCaseForPrint = null, currentDate = new Date();
 let currentSelectedDateStr = null, rescheduleSessionId = null;
 
+const OWNER_EMAIL = 'mahmoud.abdelhamyd@gmail.com';
+const OWNER_LICENSE_KEY = 'OWNER-PERMANENT-QAYD';
+const OWNER_LICENSE_EXPIRY = '9999-12-31';
+
+function normalizeEmail(value) { return String(value || '').trim().toLowerCase(); }
+function isOwnerEmail(value) { return normalizeEmail(value) === OWNER_EMAIL; }
+
+async function ensureOwnerLicense(officeId = null) {
+    await initSupabase();
+    if (!supabaseClient) return false;
+    const payload = {
+        license_key: OWNER_LICENSE_KEY,
+        email: OWNER_EMAIL,
+        expiry_date: OWNER_LICENSE_EXPIRY,
+        is_active: true,
+        notes: 'تفعيل دائم لمالك تطبيق قيد',
+        ...(officeId ? { office_id: officeId } : {})
+    };
+    const { data: existing } = await supabaseClient.from('licenses').select('license_key').eq('license_key', OWNER_LICENSE_KEY).maybeSingle();
+    const { error } = existing
+        ? await supabaseClient.from('licenses').update(payload).eq('license_key', OWNER_LICENSE_KEY)
+        : await supabaseClient.from('licenses').insert([payload]);
+    if (error) console.warn('تعذر مزامنة ترخيص المالك:', error);
+    return !error;
+}
+
 let DEV_MODE = false;
 (async () => {
     if (ipcRenderer && ipcRenderer.getDevMode) {
@@ -114,6 +140,11 @@ async function loadAndDisplayLicenseStatus() {
     }
     const licenseKey = offices[0].license_key;
     const expiryDate = offices[0].license_expiry;
+    if (isOwnerEmail(offices[0].email) || licenseKey === OWNER_LICENSE_KEY) {
+        document.getElementById('licenseStatusText').innerHTML = '<span class="text-success">تفعيل دائم — مالك التطبيق</span>';
+        if (activateBtn) activateBtn.style.display = 'none';
+        return;
+    }
     if (!licenseKey || !expiryDate) {
         document.getElementById('licenseStatusText').innerHTML = '<span class="text-warning">غير مفعل</span>';
         if (activateBtn) activateBtn.style.display = 'block';
@@ -135,6 +166,7 @@ async function loadAndDisplayLicenseStatus() {
 }
 
 async function checkLicenseValidity(licenseKey) {
+    if (licenseKey === OWNER_LICENSE_KEY) return { valid: true, expiry: OWNER_LICENSE_EXPIRY, message: 'تفعيل دائم لمالك التطبيق' };
     if (!supabaseClient) await initSupabase();
     const { data, error } = await supabaseClient
     .from('licenses')
@@ -147,6 +179,14 @@ async function checkLicenseValidity(licenseKey) {
     if (expiry < new Date()) return { valid: false, message: 'انتهت صلاحية الترخيص في ' + data.expiry_date };
     return { valid: true, expiry: data.expiry_date, message: 'ترخيص صالح' };
 }
+
+window.startFirstInstallRegistration = function() {
+    const offices = db.offices.toArray();
+    offices.then(items => {
+        if (items.length > 0) return Swal.fire('تنبيه', 'يوجد مكتب مسجل على هذا الجهاز. استخدم الدخول أو الاسترداد.', 'info');
+        showModal('officeSetupModal');
+    });
+};
 
 window.showLicenseModal = function() {
     document.getElementById('licenseModalOptions').style.display = 'block';
@@ -174,9 +214,17 @@ window.hideTrialEmail = function() {
 };
 
 window.startFreeTrialWithEmail = async function() {
-    const email = document.getElementById('trialEmail').value.trim();
+    const email = normalizeEmail(document.getElementById('trialEmail').value);
     if (!email || !email.includes('@')) {
         Swal.fire('خطأ', 'يرجى إدخال بريد إلكتروني صحيح', 'error');
+        return;
+    }
+    if (isOwnerEmail(email)) {
+        localStorage.setItem('pendingLicenseKey', OWNER_LICENSE_KEY);
+        localStorage.setItem('pendingLicenseExpiry', OWNER_LICENSE_EXPIRY);
+        await ensureOwnerLicense();
+        hideModal('licenseModal');
+        Swal.fire('تم التعرف على المالك', 'سيتم تفعيل التطبيق بشكل دائم بعد حفظ بيانات المكتب.', 'success').then(() => showModal('officeSetupModal'));
         return;
     }
     const trialKey = 'TRIAL-' + Math.random().toString(36).substring(2, 10).toUpperCase();
@@ -209,6 +257,13 @@ window.startFreeTrialWithEmail = async function() {
 window.verifyActivationCode = async function() {
     const code = document.getElementById('activationCode').value.trim();
     if (!code) return Swal.fire('خطأ', 'أدخل كود التفعيل', 'error');
+    if (code === OWNER_LICENSE_KEY) {
+        localStorage.setItem('pendingLicenseKey', OWNER_LICENSE_KEY);
+        localStorage.setItem('pendingLicenseExpiry', OWNER_LICENSE_EXPIRY);
+        hideModal('licenseModal');
+        Swal.fire('تم', 'تم التعرف على كود مالك التطبيق. التفعيل دائم.', 'success').then(() => showModal('officeSetupModal'));
+        return;
+    }
     await initSupabase();
     const { data, error } = await supabaseClient.from('licenses').select('license_key, expiry_date, is_active').eq('license_key', code).single();
     if (error || !data) return Swal.fire('خطأ', 'كود التفعيل غير صالح', 'error');
@@ -246,7 +301,7 @@ function manualTabHandler(e) { e.preventDefault(); const target = this.getAttrib
 // ========== 4. إعداد المكتب (مع ربط الترخيص المعلق) ==========
 window.saveOfficeSetup = async function() {
     const officeName = document.getElementById('officeNameInput').value.trim();
-    const email = document.getElementById('officeEmailInput').value.trim();
+    const email = normalizeEmail(document.getElementById('officeEmailInput').value);
     const pin = document.getElementById('initialPin').value;
     const confirm = document.getElementById('confirmPin').value;
     if (!officeName) return Swal.fire('خطأ', 'أدخل اسم المحامي أو المكتب', 'error');
@@ -255,6 +310,10 @@ window.saveOfficeSetup = async function() {
 
     let licenseKey = localStorage.getItem('pendingLicenseKey');
     let licenseExpiry = localStorage.getItem('pendingLicenseExpiry');
+    if (isOwnerEmail(email)) {
+        licenseKey = OWNER_LICENSE_KEY;
+        licenseExpiry = OWNER_LICENSE_EXPIRY;
+    }
     if (!licenseKey && !DEV_MODE) {
         Swal.fire('تنبيه', 'يجب تفعيل الترخيص قبل إعداد المكتب', 'warning');
         showLicenseModal();
@@ -273,7 +332,8 @@ window.saveOfficeSetup = async function() {
     window.continueOfficeSetup = null;
 
     if (licenseKey && supabaseClient) {
-        await supabaseClient.from('licenses').update({ office_id: officeId }).eq('license_key', licenseKey);
+        if (licenseKey === OWNER_LICENSE_KEY) await ensureOwnerLicense(officeId);
+        else await supabaseClient.from('licenses').update({ office_id: officeId }).eq('license_key', licenseKey);
     }
 
     try {
@@ -372,7 +432,7 @@ window.verifyPin = async function() {
     const entered = document.getElementById('pinInput').value;
     const offices = await db.offices.toArray();
     if (offices.length === 0) {
-        showLicenseModal();
+        showModal('officeSetupModal');
         return;
     }
     if (entered === offices[0].pin) {
@@ -1020,7 +1080,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelectorAll('.tab-pane').forEach(pane => { pane.style.display = 'none'; });
     await initSupabase();
     const hasOffice = await checkOfficeSetup();
-    if (!hasOffice) showLicenseModal();
+    if (!hasOffice) showModal('officeSetupModal');
 });
 
 // ========== 20. مودال الإعدادات (إضافة هذه الدالة في النهاية) ==========
