@@ -149,9 +149,7 @@
         <div class="nav flex-column nav-pills" role="tablist">
             <button class="nav-link active" id="agenda-tab" data-bs-target="#agendaTab" type="button" role="tab" onclick="renderCalendar()"><i class="bi bi-calendar3 fs-5"></i> الأجندة</button>
             <button class="nav-link" id="cases-tab" data-bs-target="#cases" type="button" role="tab" onclick="loadCasesList()"><i class="bi bi-briefcase fs-5"></i> إدارة المكتب</button>
-            <!-- خدمات المكتب غير القضائية تُدار منفصلة عن القضايا مع كود متابعة مستقل. -->
-            <button class="nav-link" type="button" onclick="loadCasesList(); showTab('cases')"><i class="bi bi-folder2-open fs-5"></i> كل ملفات المكتب</button>
-            <button class="nav-link" type="button" onclick="openProfessionalFileModal()"><i class="bi bi-plus-circle fs-5"></i> ملف مهني جديد</button>
+            <!-- تتم إضافة القضايا والملفات والتحقيقات من داخل صفحة إدارة المكتب فقط. -->
             <button class="nav-link" id="sessions-tab" data-bs-target="#sessions" type="button" role="tab"><i class="bi bi-calendar-event fs-5"></i> الجلسات</button>
             <button class="nav-link" id="archive-tab" data-bs-target="#archiveTab" type="button" role="tab" onclick="loadArchivedCases()"><i class="bi bi-archive fs-5"></i> الأرشيف</button>
             <button class="nav-link" id="search-tab" data-bs-target="#searchTab" type="button" role="tab" onclick="loadStats()"><i class="bi bi-search fs-5"></i> بحث وتقارير</button>
