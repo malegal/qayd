@@ -133,6 +133,12 @@
         .text-white, .text-white-50 { color: #53657d !important; }
         .text-light { color: #34465e !important; }
         .gold-text, .stats-number, .result-date { color: #8a6814 !important; }
+        /* تحسين وضوح هوية المكتب والإعدادات في أسفل القائمة الجانبية. */
+        #sidebar .sidebar-brand .text-white-50 { color: #ffffff !important; opacity: 1 !important; font-weight: 700; }
+        #sidebar #sidebarOfficeName { color: #f1cc69 !important; -webkit-text-fill-color: #f1cc69 !important; text-shadow: 0 1px 8px rgba(0,0,0,.18); }
+        #sidebar .btn-outline-secondary { color: #ffffff !important; border-color: #d5b04c !important; background: #24466e !important; font-weight: 800; box-shadow: 0 4px 12px rgba(0,0,0,.16); }
+        #sidebar .btn-outline-secondary:hover, #sidebar .btn-outline-secondary:focus { color: #172235 !important; border-color: #f1cc69 !important; background: #f1cc69 !important; box-shadow: 0 4px 14px rgba(241,204,105,.24); }
+        #sidebar #licenseStatus { color: #ffffff !important; opacity: 1 !important; }
 </style>
 </head>
 <body data-bs-theme="light">
@@ -170,7 +176,7 @@
         <div class="nav flex-column nav-pills" role="tablist">
             <button class="nav-link active" id="agenda-tab" data-bs-target="#agendaTab" type="button" role="tab" onclick="renderCalendar()"><i class="bi bi-calendar3 fs-5"></i> الأجندة</button>
             <button class="nav-link" id="cases-tab" data-bs-target="#cases" type="button" role="tab" onclick="loadCasesList()"><i class="bi bi-briefcase fs-5"></i> إدارة المكتب</button>
-            <button class="nav-link" id="finance-tab" data-bs-target="#financeTab" type="button" role="tab" onclick="loadFinancePage()"><i class="bi bi-cash-stack fs-5"></i> الأتعاب والمصروفات</button>
+            <!-- تبويب موحّد للأتعاب والمصروفات؛ كان مكرراً في القائمة الجانبية وتم الإبقاء على رابط واحد فقط. -->
             <button class="nav-link" id="finance-tab" data-bs-target="#financeTab" type="button" role="tab" onclick="loadFinancePage()"><i class="bi bi-cash-stack fs-5"></i> الأتعاب والمصروفات</button>
             <!-- تتم إضافة القضايا والملفات والتحقيقات من داخل صفحة إدارة المكتب فقط. -->
             <button class="nav-link" id="sessions-tab" data-bs-target="#sessions" type="button" role="tab"><i class="bi bi-calendar-event fs-5"></i> الجلسات</button>
