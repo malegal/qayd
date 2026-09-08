@@ -1276,7 +1276,7 @@ function assertValidProfessionalFileCode(code) {
     return normalized;
 }
 function professionalTypeLabel(type) {
-    return { real_estate: 'تسجيل شهر عقاري', contract_writing: 'كتابة عقد', company_formation: 'تأسيس شركة', prosecution_investigation: 'تحقيق نيابة', detention_renewal: 'تجديد حبس', administrative: 'خدمة مهنية إدارية' }[type] || 'خدمة مهنية';
+    return { real_estate: 'تسجيل شهر عقاري', contract_writing: 'كتابة عقد', company_formation: 'تأسيس شركة', prosecution_investigation: 'تحقيق نيابة', detention_renewal: 'تجديد حبس', administrative: 'خدمة إدارية' }[type] || 'خدمة مهنية';
 }
 window.openProfessionalFileModal = async function() {
     if (!currentOfficeId) return Swal.fire('تنبيه', 'يجب إعداد المكتب أولًا', 'warning');
@@ -1294,11 +1294,14 @@ window.openProfessionalFileModal = async function() {
     if (description) description.value = '';
     showModal('professionalFileModal');
 };
-window.openInvestigationFileModal = async function() {
+// نقطة الدخول القديمة محفوظة للتوافق مع الاختصارات أو نسخ الواجهة السابقة.
+// الزر الحالي يستعمل openAdministrativeFileModal حتى لا ننشئ ملفات تحقيق بالخطأ.
+window.openAdministrativeFileModal = async function() {
     await window.openProfessionalFileModal();
-    const type = document.getElementById('professionalFileType'); if (type) type.value = 'prosecution_investigation';
-    const modalTitle = document.getElementById('professionalFileModalTitle'); if (modalTitle) modalTitle.innerHTML = '<i class="bi bi-shield-exclamation"></i> إنشاء ملف تحقيقات';
+    const type = document.getElementById('professionalFileType'); if (type) type.value = 'administrative';
+    const modalTitle = document.getElementById('professionalFileModalTitle'); if (modalTitle) modalTitle.innerHTML = '<i class="bi bi-building-gear"></i> إنشاء ملف إداري';
 };
+window.openInvestigationFileModal = window.openAdministrativeFileModal;
 window.saveProfessionalFile = async function() {
     try {
         if (!currentOfficeId) throw new Error('لم يتم تحديد المكتب');

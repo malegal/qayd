@@ -258,7 +258,8 @@
             <div class="tab-pane fade" id="cases" role="tabpanel">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                     <h3 class="gold-text">إدارة المكتب</h3>
-                    <div class="d-flex gap-2 flex-wrap"><button class="gold-btn" onclick="openAddCaseModal()"><i class="bi bi-plus-lg"></i> قضية +</button><button class="btn btn-outline-warning" onclick="openProfessionalFileModal()"><i class="bi bi-folder-plus"></i> ملف مهني +</button><button class="btn btn-outline-danger" onclick="openInvestigationFileModal()"><i class="bi bi-shield-exclamation"></i> تحقيق +</button></div>
+                    <!-- زر الملف الإداري يستخدم نموذج الخدمات المهنية، لكنه يضبط نوع السجل إلى administrative. -->
+                    <div class="d-flex gap-2 flex-wrap"><button class="gold-btn" onclick="openAddCaseModal()"><i class="bi bi-plus-lg"></i> قضية +</button><button class="btn btn-outline-warning" onclick="openProfessionalFileModal()"><i class="bi bi-folder-plus"></i> ملف مهني +</button><button class="btn btn-outline-danger" onclick="openAdministrativeFileModal()"><i class="bi bi-building-gear"></i> ملف إداري +</button></div>
                     </div>
                     <!-- لوحة اختصارات سريعة للعمليات اليومية الأكثر استخدامًا. -->
                     <div class="quick-actions-grid">
@@ -594,7 +595,7 @@
   <div class="modal-dialog modal-lg"><div class="modal-content">
     <div class="modal-header"><h5 class="modal-title gold-text" id="professionalFileModalTitle"><i class="bi bi-briefcase"></i> إنشاء ملف خدمة مهنية</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
     <div class="modal-body text-white"><div class="row g-3">
-      <div class="col-md-6"><label class="form-label">نوع الخدمة</label><select id="professionalFileType" class="form-select"><option value="real_estate">تسجيل شهر عقاري</option><option value="contract_writing">كتابة عقد</option><option value="company_formation">تأسيس شركة</option><option value="prosecution_investigation">تحقيق نيابة</option><option value="detention_renewal">تجديد حبس</option></select></div>
+      <div class="col-md-6"><label class="form-label">نوع الخدمة</label><select id="professionalFileType" class="form-select"><option value="real_estate">تسجيل شهر عقاري</option><option value="contract_writing">كتابة عقد</option><option value="company_formation">تأسيس شركة</option><option value="administrative">خدمة إدارية</option><option value="prosecution_investigation">تحقيق نيابة</option><option value="detention_renewal">تجديد حبس</option></select></div>
       <div class="col-md-6"><label class="form-label">اسم الملف</label><input id="professionalFileTitle" class="form-control" placeholder="مثال: تسجيل شقة في الشهر العقاري"></div>
       <div class="col-md-6"><label class="form-label">اسم العميل</label><input id="professionalClientName" class="form-control"></div>
       <div class="col-md-6"><label class="form-label">هاتف العميل</label><input id="professionalClientPhone" class="form-control" inputmode="tel"></div>

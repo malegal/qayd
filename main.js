@@ -132,7 +132,8 @@ ipcMain.handle('open-notes', async (event, folderName) => {
     } catch (err) { return { error: err.message }; }
 });
 
-// حماية مجلدات الخدمات المهنية: لا يُنشأ مجلد إلا بكود RE أو CO أو AD صالح.
+// حماية مجلدات الخدمات المهنية والإدارية: لا يُنشأ مجلد إلا بكود خدمة صالح.
+// يبقى PI مدعومًا للتوافق مع الملفات القديمة، بينما الملفات الجديدة من زر «ملف إداري» تستخدم AD.
 ipcMain.handle('create-professional-file-folder', async (event, fileCode, clientName, fileType, fileData) => {
     try {
         if (typeof fileCode !== 'string' || !/^(RE|CT|CO|PI|DR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(fileCode.trim())) {
