@@ -176,8 +176,6 @@ function bringMainWindowToFront(parent) {
     if (parent.isMinimized()) parent.restore();
     parent.show();
     parent.setFocusable(true);
-    parent.setAlwaysOnTop(true, 'floating');
-    parent.moveTop();
     parent.focus();
 }
 
@@ -186,6 +184,9 @@ async function showFilePicker(event, options) {
     const parent = BrowserWindow.fromWebContents(event.sender) || mainWindow;
     if (parent && !parent.isDestroyed()) {
         bringMainWindowToFront(parent);
+        // لا نستخدم AlwaysOnTop أثناء الحوار؛ في بعض بيئات Linux يؤدي ذلك
+        // إلى وضع نافذة النظام خلف النافذة الأم بدلًا من وضعها أمامها.
+        parent.setAlwaysOnTop(false);
     }
     const result = await dialog.showOpenDialog(parent, options);
     if (parent && !parent.isDestroyed()) {
@@ -226,7 +227,10 @@ ipcMain.handle('print-arabic-pdf', async (event, html, filename) => {
         printWindow = new BrowserWindow({ show: false, parent, modal: true, webPreferences: { offscreen: true } });
         await printWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
         const pdf = await printWindow.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 } });
-        if (parent && !parent.isDestroyed()) bringMainWindowToFront(parent);
+        if (parent && !parent.isDestroyed()) {
+            parent.setAlwaysOnTop(false);
+            bringMainWindowToFront(parent);
+        }
         const save = await dialog.showSaveDialog(parent, { title: 'حفظ ملف PDF', defaultPath: filename || 'تقرير.pdf', filters: [{ name: 'ملفات PDF', extensions: ['pdf'] }] });
         if (parent && !parent.isDestroyed()) parent.setAlwaysOnTop(false);
         if (save.canceled || !save.filePath) return { canceled: true };
