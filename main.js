@@ -176,10 +176,10 @@ async function showFilePicker(event, options) {
         parent.show();
         parent.focus();
         parent.setAlwaysOnTop(true);
-        parent.setAlwaysOnTop(false);
     }
     const result = await dialog.showOpenDialog(parent, options);
     if (parent && !parent.isDestroyed()) {
+        parent.setAlwaysOnTop(false);
         parent.show();
         parent.focus();
     }
@@ -194,6 +194,43 @@ ipcMain.handle('select-case-document', async (event) => showFilePicker(event, {
 }));
 
 // نسخ المستند إلى مجلد «مستندات العميل» بعد التحقق من كود القضية.
+ipcMain.handle('select-professional-document', async (event) => showFilePicker(event, { properties: ['openFile'], filters: [{ name: 'مستندات الملف', extensions: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'jpeg', 'png', 'webp', 'txt'] }] }));
+
+ipcMain.handle('copy-professional-document', async (event, sourcePath, fileCode, clientName, fileType) => {
+    try {
+        if (!sourcePath || !fs.existsSync(sourcePath)) return { success: false, error: 'المستند المصدر غير موجود' };
+        if (typeof fileCode !== 'string' || !/^(RE|CT|CO|PI|DR|DC|GR|PR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(fileCode.trim())) return { success: false, error: 'كود الملف غير صالح' };
+        const folders = { prosecution_investigation: 'تحقيقات النيابة', detention_renewal: 'تجديد الحبس', dispute_committee: 'لجان فض المنازعات', grievance: 'التظلمات', legal_procedure: 'الإجراءات القانونية', real_estate: 'تسجيل العقارات', contract_writing: 'العقود', company_formation: 'تأسيس الشركات', administrative: 'خدمات إدارية' };
+        const dir = path.join(app.getPath('documents'), 'مكتب المحامي', 'الخدمات', folders[fileType] || 'الإجراءات القانونية', `${fileCode} - ${String(clientName || 'عميل').replace(/[<>:"/\|?*]/g, '_')}`, 'مستندات العميل');
+        fs.mkdirSync(dir, { recursive: true });
+        const ext = path.extname(sourcePath); const stem = path.basename(sourcePath, ext).replace(/[<>:"/\|?*]/g, '_');
+        const name = `${stem}_${Date.now()}${ext}`; fs.copyFileSync(sourcePath, path.join(dir, name));
+        return { success: true, path: path.join(dir, name), name };
+    } catch (err) { return { success: false, error: err.message }; }
+});
+
+ipcMain.handle('print-arabic-pdf', async (event, html, filename) => {
+    let printWindow;
+    try {
+        const parent = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+        printWindow = new BrowserWindow({ show: false, parent, modal: true, webPreferences: { offscreen: true } });
+        await printWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+        const pdf = await printWindow.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 } });
+        if (parent && !parent.isDestroyed()) {
+            parent.show();
+            parent.focus();
+            parent.setAlwaysOnTop(true);
+        }
+        const save = await dialog.showSaveDialog(parent, { title: 'حفظ ملف PDF', defaultPath: filename || 'تقرير.pdf', filters: [{ name: 'ملفات PDF', extensions: ['pdf'] }] });
+        if (parent && !parent.isDestroyed()) parent.setAlwaysOnTop(false);
+        if (save.canceled || !save.filePath) return { canceled: true };
+        fs.writeFileSync(save.filePath, pdf);
+        parent.show(); parent.focus();
+        return { success: true, path: save.filePath };
+    } catch (err) { return { success: false, error: err.message }; }
+    finally { if (printWindow && !printWindow.isDestroyed()) printWindow.close(); }
+});
+
 ipcMain.handle('copy-case-document', async (event, sourcePath, caseCode, clientName) => {
     try {
         if (!sourcePath || !fs.existsSync(sourcePath)) return { success: false, error: 'المستند المصدر غير موجود' };

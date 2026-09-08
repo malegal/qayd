@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
                                 // إضافة مستند إلى مجلد القضية المحلي دون كشف IPC مباشرة للواجهة.
                                 selectCaseDocument: () => ipcRenderer.invoke('select-case-document'),
                                 copyCaseDocument: (sourcePath, caseCode, clientName) => ipcRenderer.invoke('copy-case-document', sourcePath, caseCode, clientName),
+                                selectProfessionalDocument: () => ipcRenderer.invoke('select-professional-document'),
+                                copyProfessionalDocument: (sourcePath, fileCode, clientName, fileType) => ipcRenderer.invoke('copy-professional-document', sourcePath, fileCode, clientName, fileType),
+                                printArabicPdf: (html, filename) => ipcRenderer.invoke('print-arabic-pdf', html, filename),
                                 copyReceipt: (sourcePath, recordId) => ipcRenderer.invoke('copy-receipt', sourcePath, recordId),
                                 openLocalFile: (filePath) => ipcRenderer.invoke('open-local-file', filePath),
                                 openTemplate: (folderName, templateName) => ipcRenderer.invoke('open-template', folderName, templateName),
