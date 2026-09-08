@@ -132,8 +132,8 @@ ipcMain.handle('open-notes', async (event, folderName) => {
     } catch (err) { return { error: err.message }; }
 });
 
-// حماية مجلدات الخدمات المهنية والإدارية: لا يُنشأ مجلد إلا بكود خدمة صالح.
-// يبقى PI مدعومًا للتوافق مع الملفات القديمة، بينما الملفات الجديدة من زر «ملف إداري» تستخدم AD.
+// حماية مجلدات الملفات الإجرائية والخدمية: لا يُنشأ مجلد إلا بكود ملف صالح.
+// الأنواع القديمة تبقى مدعومة للتوافق، والملفات الجديدة تستخدم PI/DR/DC/GR/PR أو RE/CT/CO.
 ipcMain.handle('create-professional-file-folder', async (event, fileCode, clientName, fileType, fileData) => {
     try {
         if (typeof fileCode !== 'string' || !/^(RE|CT|CO|PI|DR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(fileCode.trim())) {
@@ -142,7 +142,7 @@ ipcMain.handle('create-professional-file-folder', async (event, fileCode, client
         if (!fileData || fileData.file_code !== fileCode.trim()) {
             return { success: false, error: 'بيانات المجلد لا تطابق كود الملف' };
         }
-        const folders = { real_estate: 'الشهر العقاري', contract_writing: 'كتابة العقود', company_formation: 'تأسيس الشركات', prosecution_investigation: 'تحقيقات النيابة', detention_renewal: 'تجديد الحبس', administrative: 'خدمات إدارية' };
+        const folders = { prosecution_investigation: 'تحقيقات النيابة', detention_renewal: 'تجديد الحبس', dispute_committee: 'لجان فض المنازعات', grievance: 'التظلمات', legal_procedure: 'الإجراءات القانونية', real_estate: 'تسجيل العقارات', contract_writing: 'العقود', company_formation: 'تأسيس الشركات', administrative: 'خدمات إدارية' };
         const category = folders[fileType] || folders.administrative;
         const docsPath = app.getPath('documents');
         const baseDir = path.join(docsPath, 'مكتب المحامي', 'الخدمات', category);
@@ -159,7 +159,7 @@ ipcMain.handle('create-professional-file-folder', async (event, fileCode, client
 ipcMain.handle('open-professional-file-folder', async (event, fileCode, clientName, fileType) => {
     try {
         if (typeof fileCode !== 'string' || !/^(RE|CT|CO|PI|DR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(fileCode.trim())) return { success: false, error: 'كود غير صالح' };
-        const folders = { real_estate: 'الشهر العقاري', contract_writing: 'كتابة العقود', company_formation: 'تأسيس الشركات', prosecution_investigation: 'تحقيقات النيابة', detention_renewal: 'تجديد الحبس', administrative: 'خدمات إدارية' };
+        const folders = { prosecution_investigation: 'تحقيقات النيابة', detention_renewal: 'تجديد الحبس', dispute_committee: 'لجان فض المنازعات', grievance: 'التظلمات', legal_procedure: 'الإجراءات القانونية', real_estate: 'تسجيل العقارات', contract_writing: 'العقود', company_formation: 'تأسيس الشركات', administrative: 'خدمات إدارية' };
         const folderPath = path.join(app.getPath('documents'), 'مكتب المحامي', 'الخدمات', folders[fileType] || folders.administrative, `${fileCode} - ${clientName}`.replace(/[<>:"/\\|?*]/g, '_'));
         if (!fs.existsSync(folderPath)) return { success: false, error: 'المجلد غير موجود' };
         await shell.openPath(folderPath);
@@ -169,18 +169,29 @@ ipcMain.handle('open-professional-file-folder', async (event, fileCode, clientNa
 
 
 
-ipcMain.handle('select-file', async () => {
-    const result = await dialog.showOpenDialog(mainWindow, { properties: ['openFile'], filters: [{ name: 'صور ومستندات', extensions: ['jpg', 'jpeg', 'png', 'webp', 'pdf'] }] });
+// منتقي الملفات تابع لنافذة التطبيق ويستعيد التركيز بعدها؛ هذا يمنع ظهوره خلف التطبيق عند إعادة فتحه.
+async function showFilePicker(event, options) {
+    const parent = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+    if (parent && !parent.isDestroyed()) {
+        parent.show();
+        parent.focus();
+        parent.setAlwaysOnTop(true);
+        parent.setAlwaysOnTop(false);
+    }
+    const result = await dialog.showOpenDialog(parent, options);
+    if (parent && !parent.isDestroyed()) {
+        parent.show();
+        parent.focus();
+    }
     return result.canceled ? null : result.filePaths[0];
-});
+}
+
+ipcMain.handle('select-file', async (event) => showFilePicker(event, { properties: ['openFile'], filters: [{ name: 'صور ومستندات', extensions: ['jpg', 'jpeg', 'png', 'webp', 'pdf'] }] }));
 // اختيار أي مستند مكتبي لإضافته إلى مجلد القضية دون حذف أو نقل الملف الأصلي.
-ipcMain.handle('select-case-document', async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
-        properties: ['openFile'],
-        filters: [{ name: 'مستندات القضية', extensions: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'jpeg', 'png', 'webp', 'txt'] }]
-    });
-    return result.canceled ? null : result.filePaths[0];
-});
+ipcMain.handle('select-case-document', async (event) => showFilePicker(event, {
+    properties: ['openFile'],
+    filters: [{ name: 'مستندات القضية', extensions: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'jpeg', 'png', 'webp', 'txt'] }]
+}));
 
 // نسخ المستند إلى مجلد «مستندات العميل» بعد التحقق من كود القضية.
 ipcMain.handle('copy-case-document', async (event, sourcePath, caseCode, clientName) => {

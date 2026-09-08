@@ -1260,7 +1260,8 @@ window.showSettingsModal = function() {
 // ========== 18. الملفات المهنية ==========
 // هذه الدوال تفصل الخدمات المهنية عن القضايا القضائية وتحافظ على التوليد المحلي للكود.
 function generateProfessionalFileCode(fileType) {
-    const prefixMap = { real_estate: 'RE', contract_writing: 'CT', company_formation: 'CO', prosecution_investigation: 'PI', detention_renewal: 'DR', administrative: 'AD' };
+    // القضائي محفوظ في جدول cases؛ هذه الأكواد للملفات الإجرائية والخدمية التي لا تملك جلسات محكمة.
+    const prefixMap = { prosecution_investigation: 'PI', detention_renewal: 'DR', dispute_committee: 'DC', grievance: 'GR', legal_procedure: 'PR', real_estate: 'RE', contract_writing: 'CT', company_formation: 'CO', administrative: 'AD' };
     const prefix = prefixMap[fileType];
     if (!prefix) throw new Error('نوع الملف المهني غير صالح');
     const year = String(new Date().getFullYear()).slice(-2);
@@ -1270,13 +1271,13 @@ function generateProfessionalFileCode(fileType) {
 }
 function assertValidProfessionalFileCode(code) {
     const normalized = String(code || '').trim().toUpperCase();
-    if (!/^(RE|CT|CO|PI|DR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(normalized)) {
+    if (!/^(RE|CT|CO|PI|DR|DC|GR|PR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(normalized)) {
         throw new Error('كود الملف المهني غير صالح');
     }
     return normalized;
 }
 function professionalTypeLabel(type) {
-    return { real_estate: 'تسجيل شهر عقاري', contract_writing: 'كتابة عقد', company_formation: 'تأسيس شركة', prosecution_investigation: 'تحقيق نيابة', detention_renewal: 'تجديد حبس', administrative: 'خدمة إدارية' }[type] || 'خدمة مهنية';
+    return { prosecution_investigation: 'تحقيقات النيابة', detention_renewal: 'تجديد الحبس', dispute_committee: 'لجان فض المنازعات', grievance: 'التظلمات', legal_procedure: 'إجراءات قانونية', real_estate: 'تسجيل العقارات', contract_writing: 'العقود', company_formation: 'تأسيس الشركات', administrative: 'خدمة إدارية' }[type] || 'ملف إجرائي/خدمي';
 }
 window.openProfessionalFileModal = async function() {
     if (!currentOfficeId) return Swal.fire('تنبيه', 'يجب إعداد المكتب أولًا', 'warning');
@@ -1285,8 +1286,8 @@ window.openProfessionalFileModal = async function() {
     const client = document.getElementById('professionalClientName');
     const phone = document.getElementById('professionalClientPhone');
     const description = document.getElementById('professionalFileDescription');
-    if (type) type.value = 'real_estate';
-    const modalTitle = document.getElementById('professionalFileModalTitle'); if (modalTitle) modalTitle.innerHTML = '<i class="bi bi-briefcase"></i> إنشاء ملف خدمة مهنية';
+    if (type) type.value = 'prosecution_investigation';
+    const modalTitle = document.getElementById('professionalFileModalTitle'); if (modalTitle) modalTitle.innerHTML = '<i class="bi bi-folder-plus"></i> إنشاء ملف إجرائي/خدمي';
     ['professionalFeeTotal','professionalFeePaid','professionalFeeNotes','professionalExpenseAmount','professionalExpenseCategory'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     if (title) title.value = '';
     if (client) client.value = '';
@@ -1294,14 +1295,13 @@ window.openProfessionalFileModal = async function() {
     if (description) description.value = '';
     showModal('professionalFileModal');
 };
-// نقطة الدخول القديمة محفوظة للتوافق مع الاختصارات أو نسخ الواجهة السابقة.
-// الزر الحالي يستعمل openAdministrativeFileModal حتى لا ننشئ ملفات تحقيق بالخطأ.
-window.openAdministrativeFileModal = async function() {
+// نقطة الدخول الموحدة للملفات الإجرائية والخدمية؛ يبدأ النموذج بتحقيقات النيابة.
+window.openProcedureFileModal = async function() {
     await window.openProfessionalFileModal();
-    const type = document.getElementById('professionalFileType'); if (type) type.value = 'administrative';
-    const modalTitle = document.getElementById('professionalFileModalTitle'); if (modalTitle) modalTitle.innerHTML = '<i class="bi bi-building-gear"></i> إنشاء ملف إداري';
 };
-window.openInvestigationFileModal = window.openAdministrativeFileModal;
+// أسماء قديمة محفوظة للتوافق مع اختصارات الإصدارات السابقة.
+window.openAdministrativeFileModal = window.openProcedureFileModal;
+window.openInvestigationFileModal = window.openProcedureFileModal;
 window.saveProfessionalFile = async function() {
     try {
         if (!currentOfficeId) throw new Error('لم يتم تحديد المكتب');
