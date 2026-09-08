@@ -1106,6 +1106,98 @@ window.addCaseDocument = async function() {
     Swal.fire({ icon: 'success', title: 'تمت إضافة المستند', text: result.name, timer: 1500, showConfirmButton: false, background: '#07111f', color: '#fff' });
 };
 
+// ========== البحث المتقدم والاختصارات السريعة ==========
+let advancedSearchMode = 'view';
+window.openAdvancedSearchModal = function(mode = 'view') {
+    advancedSearchMode = mode;
+    showModal('advancedSearchModal');
+    setTimeout(() => document.getElementById('advancedQuery')?.focus(), 150);
+};
+window.openDocumentShortcut = function() { openAdvancedSearchModal('document'); };
+window.openNewSessionShortcut = function() {
+    showTab('sessions');
+    setTimeout(() => document.getElementById('s_search')?.focus(), 150);
+};
+window.clearAdvancedSearch = function() {
+    ['advancedQuery', 'advancedStatus', 'advancedFromDate', 'advancedToDate', 'advancedSessionStatus', 'advancedCourtService'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    const type = document.getElementById('advancedFileType'); if (type) type.value = '';
+    document.getElementById('advancedSearchSummary').textContent = '';
+    document.getElementById('advancedSearchResults').innerHTML = '<div class="col-12 text-center text-muted py-4">أدخل معيارًا واحدًا على الأقل ثم نفّذ البحث.</div>';
+};
+window.runAdvancedSearch = async function() {
+    const query = (document.getElementById('advancedQuery')?.value || '').trim().toLowerCase();
+    const type = document.getElementById('advancedFileType')?.value || '';
+    const status = (document.getElementById('advancedStatus')?.value || '').trim().toLowerCase();
+    const sessionStatus = (document.getElementById('advancedSessionStatus')?.value || '').trim().toLowerCase();
+    const courtService = (document.getElementById('advancedCourtService')?.value || '').trim().toLowerCase();
+    const from = document.getElementById('advancedFromDate')?.value ? new Date(`${document.getElementById('advancedFromDate').value}T00:00:00`) : null;
+    const to = document.getElementById('advancedToDate')?.value ? new Date(`${document.getElementById('advancedToDate').value}T23:59:59`) : null;
+    const matchesText = (values) => !query || values.some(value => String(value || '').toLowerCase().includes(query));
+    const matchesStatus = (value) => !status || String(value || '').toLowerCase().includes(status);
+    const matchesDate = (date) => { if (!from && !to) return true; const d = new Date(date); return (!from || d >= from) && (!to || d <= to); };
+    try {
+        const results = [];
+        if (type !== 'professional') {
+            const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).toArray();
+            const sessions = await db.sessions.where('office_id').equals(currentOfficeId).toArray();
+            const sessionsByCase = sessions.reduce((map, session) => { (map[session.case_id] ||= []).push(session); return map; }, {});
+            for (const c of cases) {
+                const caseSessions = sessionsByCase[c.id] || [];
+                const matchingSessions = caseSessions.filter(s => (!sessionStatus || String(s.case_status || '').toLowerCase().includes(sessionStatus)) && matchesDate(s.session_date));
+                const caseText = [c.client_name, c.case_code, c.case_number, c.case_year, c.court_name, c.circuit, c.opponent_name, c.case_subject, ...caseSessions.flatMap(s => [s.case_status, s.decision])];
+                const dateMatch = (!from && !to) || matchingSessions.length > 0;
+                if ((!type || type === 'judicial') && matchesText(caseText) && matchesStatus(caseSessions[0]?.case_status) && (!courtService || [c.court_name, c.case_type].some(v => String(v || '').toLowerCase().includes(courtService))) && dateMatch) {
+                    results.push({ kind: 'judicial', item: c, sessions: caseSessions, sortDate: caseSessions[0]?.session_date || c.updated_at || c.created_at });
+                }
+            }
+        }
+        if (type !== 'judicial' && db.officeFiles) {
+            const files = await db.officeFiles.where('office_id').equals(currentOfficeId).toArray();
+            for (const file of files) {
+                const fileText = [file.client_name, file.file_code, file.title, file.description, file.file_type, file.status];
+                const fileDate = file.updated_at || file.created_at;
+                if ((!type || type === 'professional') && matchesText(fileText) && matchesStatus(file.status) && (!courtService || [file.title, file.file_type].some(v => String(v || '').toLowerCase().includes(courtService))) && matchesDate(fileDate)) {
+                    results.push({ kind: 'professional', item: file, sessions: [], sortDate: fileDate });
+                }
+            }
+        }
+        results.sort((a, b) => new Date(b.sortDate || 0) - new Date(a.sortDate || 0));
+        const summary = document.getElementById('advancedSearchSummary');
+        summary.textContent = `عدد النتائج: ${results.length}${advancedSearchMode === 'document' ? ' — اختر قضية لإضافة مستند إليها' : ''}`;
+        const container = document.getElementById('advancedSearchResults');
+        if (!results.length) { container.innerHTML = '<div class="col-12 text-center text-muted py-4">لا توجد نتائج مطابقة لمعايير البحث.</div>'; return; }
+        container.innerHTML = results.map(result => {
+            const item = result.item;
+            const isJudicial = result.kind === 'judicial';
+            const label = isJudicial ? 'ملف قضائي' : professionalTypeLabel(item.file_type);
+            const code = isJudicial ? item.case_code : item.file_code;
+            const statusLabel = isJudicial ? (result.sessions[0]?.case_status || 'جديدة') : (item.status || 'قيد الإجراء');
+            const action = advancedSearchMode === 'document' && isJudicial
+                ? `<button class="btn btn-sm btn-outline-info" onclick="event.stopPropagation(); addCaseDocumentForId('${item.id}')"><i class="bi bi-file-earmark-plus"></i> إضافة مستند</button>`
+                : `<button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); openAdvancedResult('${result.kind}','${item.id}')"><i class="bi bi-box-arrow-up-right"></i> فتح</button>`;
+            return `<div class="col-md-6"><article class="card-glass advanced-result-card p-3" onclick="openAdvancedResult('${result.kind}','${item.id}')"><div class="d-flex justify-content-between gap-2"><strong>${escapeHtml(item.client_name || '-')}</strong><span class="badge bg-secondary">${escapeHtml(label)}</span></div><div class="advanced-result-meta mt-2">${escapeHtml(code || '-')} · ${escapeHtml(statusLabel)}</div><div class="advanced-result-meta">${escapeHtml(isJudicial ? `${item.court_name || '-'} · قضية ${item.case_number || '-'}/${item.case_year || '-'}` : (item.title || '-'))}</div><div class="text-end mt-2">${action}</div></article></div>`;
+        }).join('');
+    } catch (error) { console.error('البحث المتقدم:', error); Swal.fire('خطأ', 'تعذر تنفيذ البحث المتقدم', 'error'); }
+};
+window.openAdvancedResult = async function(kind, id) {
+    hideModal('advancedSearchModal');
+    if (kind === 'judicial') return openCaseDetails(id);
+    showModal('professionalFilesModal');
+    if (typeof renderProfessionalFiles === 'function') await renderProfessionalFiles();
+};
+window.addCaseDocumentForId = async function(id) {
+    hideModal('advancedSearchModal');
+    activeCaseId = id;
+    await addCaseDocument();
+};
+window.addEventListener('keydown', (event) => {
+    if (!event.ctrlKey) return;
+    if (event.key.toLowerCase() === 'k') { event.preventDefault(); openAdvancedSearchModal(); }
+    if (event.key.toLowerCase() === 'n' && !event.shiftKey) { event.preventDefault(); openAddCaseModal(); }
+    if (event.key.toLowerCase() === 'u') { event.preventDefault(); openDocumentShortcut(); }
+    if (event.key.toLowerCase() === 's') { event.preventDefault(); syncWithSupabase(); }
+});
+
 window.saveEditedCase = async function() { const updated = { client_name: document.getElementById('edit_c_name').value, client_phone: document.getElementById('edit_c_phone').value, opponent_name: document.getElementById('edit_c_opponent').value, case_number: document.getElementById('edit_c_num').value, case_year: document.getElementById('edit_c_year').value, court_name: document.getElementById('edit_c_court').value, circuit: document.getElementById('edit_c_circuit').value, case_type: document.getElementById('edit_case_type').value, case_subject: document.getElementById('edit_c_subject').value }; const currentCase = await db.cases.get(activeCaseId); if (!currentCase) throw new Error('القضية غير موجودة'); const caseCode = assertValidCaseCode(currentCase.case_code); await db.cases.update(activeCaseId, updated); await db.pendingOperations.add({ operation: 'update_case', data: { id: activeCaseId, case_code: caseCode, ...updated }, timestamp: Date.now() }); hideModal('editCaseModal'); openCaseDetails(activeCaseId); Swal.fire({ icon: 'success', title: 'تم التعديل محلياً', timer: 1000, showConfirmButton: false, background: '#0f172a' }); updatePendingBadge(); };
 window.calculateDate = function() { const startDate = document.getElementById('calcStartDate').value; if (!startDate) return Swal.fire('تنبيه', 'الرجاء اختيار تاريخ البداية', 'warning'); const days = parseInt(document.getElementById('calcDays').value) || 0; const date = new Date(startDate); date.setDate(date.getDate() + days); const resultStr = date.toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' }); document.getElementById('calcResult').innerText = resultStr; window.calculatedDate = date; };
 window.addCalculatedDateAsEvent = function() { if (!window.calculatedDate) return Swal.fire('تنبيه', 'قم بحساب التاريخ أولاً', 'warning'); const dateStr = window.calculatedDate.toISOString().split('T')[0]; const title = prompt('أدخل وصف الحدث:', 'موعد قانوني'); if (title) { db.events.add({ title, date: dateStr, type: 'legal' }); renderCalendar(); Swal.fire('تم', 'تم إضافة الحدث', 'success'); } };

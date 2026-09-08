@@ -120,6 +120,13 @@
         .sidebar-brand, .nav-pills .nav-link { color: #eaf0f7; }
         .nav-pills .nav-link:hover { background: rgba(190,145,36,.18); color: #fff; }
         .nav-pills .nav-link.active { background: rgba(190,145,36,.22); color: #f1cc69; }
+        /* اختصارات المكتب: أزرار واضحة للوصول السريع إلى أكثر الإجراءات استخدامًا. */
+        .quick-actions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; margin-bottom: 1.25rem; }
+        .quick-action { display: flex; align-items: center; gap: .55rem; justify-content: center; min-height: 54px; font-weight: 800; }
+        .advanced-result-card { cursor: pointer; transition: transform .15s, box-shadow .15s; }
+        .advanced-result-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(31,48,74,.15); }
+        .advanced-result-meta { color: #53657d; font-size: .85rem; }
+        @media (max-width: 640px) { .quick-actions-grid { grid-template-columns: repeat(2, 1fr); } }
         .card-glass, .case-card-item, .case-detail-panel, .calendar-section, .calculator-section { background: #fff; border-color: #d9e1eb; box-shadow: 0 8px 24px rgba(31,48,74,.06); }
         .calendar-day { background: #fff; border-color: #d9e1eb; }
         .calendar-day:hover, .calendar-day.today { background: #fff9e8; }
@@ -246,11 +253,20 @@
 
             <!-- تبويب القضايا -->
             <div class="tab-pane fade" id="cases" role="tabpanel">
-                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
                     <h3 class="gold-text">إدارة المكتب</h3>
                     <div class="d-flex gap-2 flex-wrap"><button class="gold-btn" onclick="openAddCaseModal()"><i class="bi bi-plus-lg"></i> إضافة قضية</button><button class="btn btn-outline-warning" onclick="openProfessionalFileModal()"><i class="bi bi-folder-plus"></i> إضافة ملف مهني</button><button class="btn btn-outline-danger" onclick="openInvestigationFileModal()"><i class="bi bi-shield-exclamation"></i> إضافة ملف تحقيقات</button></div>
-                </div>
-                <div class="cases-container">
+                    </div>
+                    <!-- لوحة اختصارات سريعة للعمليات اليومية الأكثر استخدامًا. -->
+                    <div class="quick-actions-grid">
+                        <button class="btn gold-btn quick-action" onclick="openAddCaseModal()"><i class="bi bi-plus-circle"></i> قضية جديدة</button>
+                        <button class="btn btn-outline-warning quick-action" onclick="openProfessionalFileModal()"><i class="bi bi-folder-plus"></i> ملف مهني جديد</button>
+                        <button class="btn btn-outline-info quick-action" onclick="openDocumentShortcut()"><i class="bi bi-file-earmark-plus"></i> إضافة مستند</button>
+                        <button class="btn btn-outline-success quick-action" onclick="openNewSessionShortcut()"><i class="bi bi-calendar-plus"></i> إضافة جلسة</button>
+                        <button class="btn btn-outline-primary quick-action" onclick="openAdvancedSearchModal()"><i class="bi bi-search"></i> بحث متقدم</button>
+                        <button class="btn btn-outline-secondary quick-action" onclick="syncWithSupabase()"><i class="bi bi-arrow-repeat"></i> مزامنة الآن</button>
+                    </div>
+                    <div class="cases-container">
                     <div class="cases-list">
                         <div class="filter-bar">
                             <input type="text" id="caseSearchInput" class="form-control" placeholder="بحث باسم العميل أو المحكمة أو رقم الملف..." onkeyup="filterCasesList()">
@@ -341,6 +357,28 @@
             </div>
         </div>
     </div>
+</div>
+
+<!-- مودال البحث المتقدم -->
+<div class="modal fade" id="advancedSearchModal" tabindex="-1">
+    <div class="modal-dialog modal-xl"><div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title gold-text"><i class="bi bi-search"></i> البحث المتقدم</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <div class="row g-3">
+                <div class="col-md-4"><label>كلمة البحث</label><input id="advancedQuery" class="form-control" placeholder="اسم العميل، الكود، المحكمة، الخصم أو القرار"></div>
+                <div class="col-md-2"><label>نوع الملف</label><select id="advancedFileType" class="form-select"><option value="">كل الملفات</option><option value="judicial">قضائي</option><option value="professional">مهني</option></select></div>
+                <div class="col-md-2"><label>الحالة</label><input id="advancedStatus" class="form-control" placeholder="مثال: مؤجلة أو مكتمل"></div>
+                <div class="col-md-2"><label>من تاريخ</label><input id="advancedFromDate" type="date" class="form-control"></div>
+                <div class="col-md-2"><label>إلى تاريخ</label><input id="advancedToDate" type="date" class="form-control"></div>
+            </div>
+            <div class="row g-3 mt-1">
+                <div class="col-md-4"><label>حالة الجلسة</label><input id="advancedSessionStatus" class="form-control" placeholder="جديدة، مؤجلة، محكوم فيها..."></div>
+                <div class="col-md-4"><label>المحكمة أو الخدمة</label><input id="advancedCourtService" class="form-control" placeholder="اسم المحكمة أو نوع الخدمة"></div>
+                <div class="col-md-4 d-flex align-items-end gap-2"><button class="gold-btn flex-grow-1" onclick="runAdvancedSearch()"><i class="bi bi-search"></i> تنفيذ البحث</button><button class="btn btn-outline-secondary" onclick="clearAdvancedSearch()">مسح</button></div>
+            </div>
+            <hr><div id="advancedSearchSummary" class="small text-muted mb-2"></div><div id="advancedSearchResults" class="row g-3"></div>
+        </div>
+    </div></div>
 </div>
 
 <!-- ========== المودالات ========== -->
