@@ -12,6 +12,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
                                 saveFeesCSV: (folderName, csvContent) => ipcRenderer.invoke('save-fees-csv', folderName, csvContent),
                                 showNotification: (title, body) => ipcRenderer.send('show-notification', title, body),
                                 selectFile: () => ipcRenderer.invoke('select-file'),
+                                // إضافة مستند إلى مجلد القضية المحلي دون كشف IPC مباشرة للواجهة.
+                                selectCaseDocument: () => ipcRenderer.invoke('select-case-document'),
+                                copyCaseDocument: (sourcePath, caseCode, clientName) => ipcRenderer.invoke('copy-case-document', sourcePath, caseCode, clientName),
                                 copyReceipt: (sourcePath, recordId) => ipcRenderer.invoke('copy-receipt', sourcePath, recordId),
                                 openLocalFile: (filePath) => ipcRenderer.invoke('open-local-file', filePath),
                                 openTemplate: (folderName, templateName) => ipcRenderer.invoke('open-template', folderName, templateName),

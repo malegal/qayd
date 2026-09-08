@@ -172,6 +172,34 @@ ipcMain.handle('select-file', async () => {
     const result = await dialog.showOpenDialog(mainWindow, { properties: ['openFile'], filters: [{ name: 'صور ومستندات', extensions: ['jpg', 'jpeg', 'png', 'webp', 'pdf'] }] });
     return result.canceled ? null : result.filePaths[0];
 });
+// اختيار أي مستند مكتبي لإضافته إلى مجلد القضية دون حذف أو نقل الملف الأصلي.
+ipcMain.handle('select-case-document', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openFile'],
+        filters: [{ name: 'مستندات القضية', extensions: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'jpeg', 'png', 'webp', 'txt'] }]
+    });
+    return result.canceled ? null : result.filePaths[0];
+});
+
+// نسخ المستند إلى مجلد «مستندات العميل» بعد التحقق من كود القضية.
+ipcMain.handle('copy-case-document', async (event, sourcePath, caseCode, clientName) => {
+    try {
+        if (!sourcePath || !fs.existsSync(sourcePath)) return { success: false, error: 'المستند المصدر غير موجود' };
+        if (typeof caseCode !== 'string' || !/^JELR-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}$/.test(caseCode.trim())) return { success: false, error: 'كود القضية غير صالح' };
+        const safeCode = caseCode.trim();
+        const safeClient = String(clientName || 'عميل').replace(/[<>:"/\\|?*]/g, '_');
+        const targetDir = path.join(app.getPath('documents'), 'مكتب المحامي', 'القضايا', `${safeCode} - ${safeClient}`, 'مستندات العميل');
+        fs.mkdirSync(targetDir, { recursive: true });
+        const originalName = path.basename(sourcePath).replace(/[<>:"/\\|?*]/g, '_');
+        const ext = path.extname(originalName);
+        const stem = path.basename(originalName, ext);
+        const targetName = `${stem}_${Date.now()}${ext}`;
+        const targetPath = path.join(targetDir, targetName);
+        fs.copyFileSync(sourcePath, targetPath);
+        return { success: true, path: targetPath, name: targetName };
+    } catch (err) { return { success: false, error: err.message }; }
+});
+
 ipcMain.handle('copy-receipt', async (event, sourcePath, recordId) => {
     try {
         if (!sourcePath || !recordId || !fs.existsSync(sourcePath)) return { success: false, error: 'ملف الإيصال غير موجود' };
