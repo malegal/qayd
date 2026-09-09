@@ -158,7 +158,7 @@ ipcMain.handle('create-professional-file-folder', async (event, fileCode, client
 
 ipcMain.handle('open-professional-file-folder', async (event, fileCode, clientName, fileType) => {
     try {
-        if (typeof fileCode !== 'string' || !/^(RE|CT|CO|PI|DR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(fileCode.trim())) return { success: false, error: 'كود غير صالح' };
+        if (typeof fileCode !== 'string' || !/^(RE|CT|CO|PI|DR|DC|GR|PR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(fileCode.trim())) return { success: false, error: 'كود غير صالح' };
         const folders = { prosecution_investigation: 'تحقيقات النيابة', detention_renewal: 'تجديد الحبس', dispute_committee: 'لجان فض المنازعات', grievance: 'التظلمات', legal_procedure: 'الإجراءات القانونية', real_estate: 'تسجيل العقارات', contract_writing: 'العقود', company_formation: 'تأسيس الشركات', administrative: 'خدمات إدارية' };
         const folderPath = path.join(app.getPath('documents'), 'مكتب المحامي', 'الخدمات', folders[fileType] || folders.administrative, `${fileCode} - ${clientName}`.replace(/[<>:"/\\|?*]/g, '_'));
         if (!fs.existsSync(folderPath)) return { success: false, error: 'المجلد غير موجود' };
@@ -168,6 +168,26 @@ ipcMain.handle('open-professional-file-folder', async (event, fileCode, clientNa
 });
 
 
+
+// نافذة مضيفة مؤقتة لحوارات Linux الأصلية. بعض مديري النوافذ يتجاهلون parent
+// بعد أول استخدام، لذلك نستخدم نافذة صغيرة قابلة للتركيز لكل حوار ثم نغلقها.
+function createDialogHost(parent) {
+    const host = new BrowserWindow({
+        width: 1,
+        height: 1,
+        show: false,
+        frame: false,
+        transparent: true,
+        skipTaskbar: true,
+        focusable: true,
+        parent: parent && !parent.isDestroyed() ? parent : undefined,
+        webPreferences: { sandbox: true }
+    });
+    host.setAlwaysOnTop(true, 'floating');
+    host.show();
+    host.focus();
+    return host;
+}
 
 // إعادة تركيز التطبيق قبل النوافذ الأصلية في Linux؛ بعض مديري النوافذ لا يكتفون بعلاقة parent وحدها.
 function bringMainWindowToFront(parent) {
@@ -182,19 +202,18 @@ function bringMainWindowToFront(parent) {
 // منتقي الملفات تابع لنافذة التطبيق ويستعيد التركيز بعدها؛ هذا يمنع ظهوره خلف التطبيق عند إعادة فتحه.
 async function showFilePicker(event, options) {
     const parent = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+    let host;
     if (parent && !parent.isDestroyed()) {
         bringMainWindowToFront(parent);
-        // لا نستخدم AlwaysOnTop أثناء الحوار؛ في بعض بيئات Linux يؤدي ذلك
-        // إلى وضع نافذة النظام خلف النافذة الأم بدلًا من وضعها أمامها.
-        parent.setAlwaysOnTop(false);
+        host = createDialogHost(parent);
     }
-    const result = await dialog.showOpenDialog(parent, options);
-    if (parent && !parent.isDestroyed()) {
-        parent.setAlwaysOnTop(false);
-        parent.show();
-        parent.focus();
+    try {
+        const result = await dialog.showOpenDialog(host || parent, options);
+        return result.canceled ? null : (options.properties?.includes('multiSelections') ? result.filePaths : result.filePaths[0]);
+    } finally {
+        if (host && !host.isDestroyed()) host.close();
+        if (parent && !parent.isDestroyed()) { parent.show(); parent.focus(); }
     }
-    return result.canceled ? null : (options.properties?.includes('multiSelections') ? result.filePaths : result.filePaths[0]);
 }
 
 ipcMain.handle('select-file', async (event) => showFilePicker(event, { properties: ['openFile'], filters: [{ name: 'صور ومستندات', extensions: ['jpg', 'jpeg', 'png', 'webp', 'pdf'] }] }));
@@ -250,24 +269,24 @@ ipcMain.handle('copy-professional-document', async (event, sourcePaths, fileCode
 });
 
 ipcMain.handle('print-arabic-pdf', async (event, html, filename) => {
-    let printWindow;
+    let printWindow, host;
     try {
         const parent = BrowserWindow.fromWebContents(event.sender) || mainWindow;
         printWindow = new BrowserWindow({ show: false, parent, modal: true, webPreferences: { offscreen: true } });
         await printWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
         const pdf = await printWindow.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 } });
-        if (parent && !parent.isDestroyed()) {
-            parent.setAlwaysOnTop(false);
-            bringMainWindowToFront(parent);
-        }
-        const save = await dialog.showSaveDialog(parent, { title: 'حفظ ملف PDF', defaultPath: filename || 'تقرير.pdf', filters: [{ name: 'ملفات PDF', extensions: ['pdf'] }] });
-        if (parent && !parent.isDestroyed()) parent.setAlwaysOnTop(false);
+        if (parent && !parent.isDestroyed()) { bringMainWindowToFront(parent); host = createDialogHost(parent); }
+        const save = await dialog.showSaveDialog(host || parent, { title: 'حفظ ملف PDF', defaultPath: filename || 'تقرير.pdf', filters: [{ name: 'ملفات PDF', extensions: ['pdf'] }] });
         if (save.canceled || !save.filePath) return { canceled: true };
         fs.writeFileSync(save.filePath, pdf);
         parent.show(); parent.focus();
         return { success: true, path: save.filePath };
     } catch (err) { return { success: false, error: err.message }; }
-    finally { if (printWindow && !printWindow.isDestroyed()) printWindow.close(); }
+    finally {
+        if (host && !host.isDestroyed()) host.close();
+        if (printWindow && !printWindow.isDestroyed()) printWindow.close();
+        if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); }
+    }
 });
 
 ipcMain.handle('copy-receipt', async (event, sourcePath, recordId) => {
