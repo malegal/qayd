@@ -840,7 +840,7 @@ window.showDayDetails = async function(dateStr) {
         }
         html += `<hr class="border-secondary"><h6 class="gold-text"><i class="bi bi-calendar-event"></i> الأحداث</h6>`;
         if (events.length === 0) html += `<p class="small text-muted">لا يوجد</p>`;
-        for (let e of events) html += `<div class="p-2 mb-2 bg-dark rounded border border-success">${e.title}</div>`;
+        for (let e of events) html += `<div class="p-2 mb-2 bg-dark rounded border border-success d-flex justify-content-between align-items-center gap-2"><span>${escapeHtml(e.title)}</span><span class="text-nowrap"><button class="btn btn-sm btn-outline-warning" onclick="openEditEvent(${e.id})" title="تعديل"><i class="bi bi-pencil"></i></button><button class="btn btn-sm btn-outline-danger ms-1" onclick="deleteEvent(${e.id})" title="حذف"><i class="bi bi-trash"></i></button></span></div>`;
         html += `<hr class="border-secondary"><h6 class="gold-text"><i class="bi bi-list-check"></i> المهام</h6>`;
         if (tasks.length === 0) html += `<p class="small text-muted">لا يوجد</p>`;
         for (let t of tasks) html += `<div class="p-2 mb-2 bg-dark rounded border border-warning d-flex justify-content-between align-items-center"><span style="text-decoration:${t.completed ? 'line-through' : 'none'}">${t.description}</span><input type="checkbox" ${t.completed ? 'checked' : ''} onchange="toggleTask('${t.id}', this.checked)"></div>`;
@@ -849,6 +849,41 @@ window.showDayDetails = async function(dateStr) {
     } catch (e) { console.error(e); }
 };
 window.toggleTask = async function(id, status) { await db.tasks.update(id, { completed: status }); showDayDetails(currentSelectedDateStr); renderCalendar(); };
+let editingEventId = null;
+window.openEditEvent = async function(id) {
+    const event = await db.events.get(Number(id));
+    if (!event) return Swal.fire('تنبيه', 'الحدث غير موجود', 'warning');
+    editingEventId = event.id;
+    document.getElementById('editEventTitle').value = event.title || '';
+    document.getElementById('editEventDate').value = event.date || '';
+    document.getElementById('editEventType').value = event.type || 'other';
+    showModal('editEventModal');
+};
+window.saveEditedEvent = async function() {
+    if (editingEventId === null) return;
+    const title = document.getElementById('editEventTitle').value.trim();
+    const date = document.getElementById('editEventDate').value;
+    const type = document.getElementById('editEventType').value || 'other';
+    if (!title || !date) return Swal.fire('تنبيه', 'أدخل وصف الحدث وتاريخه', 'warning');
+    await db.events.update(editingEventId, { title, date, type });
+    hideModal('editEventModal');
+    editingEventId = null;
+    await renderCalendar();
+    if (currentSelectedDateStr) await showDayDetails(currentSelectedDateStr);
+    await loadUpcomingEvents();
+};
+window.deleteEvent = async function(id) {
+    const event = await db.events.get(Number(id));
+    if (!event) return;
+    const result = await Swal.fire({ title: 'حذف الحدث؟', text: event.title || '', icon: 'warning', showCancelButton: true, confirmButtonText: 'حذف', cancelButtonText: 'إلغاء', confirmButtonColor: '#b43b45' });
+    if (!result.isConfirmed) return;
+    await db.events.delete(Number(id));
+    if (editingEventId === Number(id)) { hideModal('editEventModal'); editingEventId = null; }
+    await renderCalendar();
+    if (currentSelectedDateStr) await showDayDetails(currentSelectedDateStr);
+    await loadUpcomingEvents();
+};
+window.deleteEditingEvent = async function() { if (editingEventId !== null) await deleteEvent(editingEventId); };
 window.addNewEvent = async function() {
     const t = document.getElementById('newEventTitle').value, d = document.getElementById('newEventDate').value, type = document.getElementById('newEventType').value;
     if (!t || !d) return;
@@ -866,7 +901,7 @@ window.loadUpcomingEvents = async function() {
         const tasks = await db.tasks.where('date').aboveOrEqual(today).filter(t => !t.completed).toArray();
         events.sort((a, b) => a.date.localeCompare(b.date)); tasks.sort((a, b) => a.date.localeCompare(b.date));
         let html = '';
-        for (let e of events) html += `<div class="p-2 mb-2 bg-dark rounded border-start border-success border-4"><span class="text-success small">${e.date}</span><br>${e.title}</div>`;
+        for (let e of events) html += `<div class="p-2 mb-2 bg-dark rounded border-start border-success border-4 d-flex justify-content-between align-items-center gap-2"><span><span class="text-success small">${escapeHtml(e.date)}</span><br>${escapeHtml(e.title)}</span><span class="text-nowrap"><button class="btn btn-sm btn-outline-warning" onclick="openEditEvent(${e.id})" title="تعديل"><i class="bi bi-pencil"></i></button><button class="btn btn-sm btn-outline-danger ms-1" onclick="deleteEvent(${e.id})" title="حذف"><i class="bi bi-trash"></i></button></span></div>`;
         for (let t of tasks) html += `<div class="p-2 mb-2 bg-dark rounded border-start border-warning border-4"><span class="text-warning small">${t.date}</span><br>${t.description}</div>`;
         document.getElementById('upcomingEventsList').innerHTML = html || '<p class="text-muted">لا يوجد</p>';
     } catch (e) { }
