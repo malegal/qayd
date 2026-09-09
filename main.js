@@ -194,29 +194,58 @@ async function showFilePicker(event, options) {
         parent.show();
         parent.focus();
     }
-    return result.canceled ? null : result.filePaths[0];
+    return result.canceled ? null : (options.properties?.includes('multiSelections') ? result.filePaths : result.filePaths[0]);
 }
 
 ipcMain.handle('select-file', async (event) => showFilePicker(event, { properties: ['openFile'], filters: [{ name: 'صور ومستندات', extensions: ['jpg', 'jpeg', 'png', 'webp', 'pdf'] }] }));
 // اختيار أي مستند مكتبي لإضافته إلى مجلد القضية دون حذف أو نقل الملف الأصلي.
 ipcMain.handle('select-case-document', async (event) => showFilePicker(event, {
-    properties: ['openFile'],
-    filters: [{ name: 'مستندات القضية', extensions: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'jpeg', 'png', 'webp', 'txt'] }]
+    // السماح باختيار عدة مستندات، وتشمل المذكرات والصحف والدعاوى بصيغها المكتبية الشائعة.
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: 'مستندات القضية والمذكرات والصحف', extensions: ['pdf', 'doc', 'docx', 'odt', 'rtf', 'xls', 'xlsx', 'jpg', 'jpeg', 'png', 'webp', 'txt'] }]
 }));
 
-// نسخ المستند إلى مجلد «مستندات العميل» بعد التحقق من كود القضية.
-ipcMain.handle('select-professional-document', async (event) => showFilePicker(event, { properties: ['openFile'], filters: [{ name: 'مستندات الملف', extensions: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'jpeg', 'png', 'webp', 'txt'] }] }));
-
-ipcMain.handle('copy-professional-document', async (event, sourcePath, fileCode, clientName, fileType) => {
+// نقل أو نسخ عدة مستندات إلى مجلد «مستندات العميل» بعد التحقق من كود القضية.
+ipcMain.handle('copy-case-document', async (event, sourcePaths, caseCode, clientName, mode = 'copy') => {
     try {
-        if (!sourcePath || !fs.existsSync(sourcePath)) return { success: false, error: 'المستند المصدر غير موجود' };
+        const paths = Array.isArray(sourcePaths) ? sourcePaths : [sourcePaths];
+        if (!paths.length || paths.some(source => !source || !fs.existsSync(source))) return { success: false, error: 'أحد المستندات المصدر غير موجود' };
+        if (typeof caseCode !== 'string' || !/^JELR-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}$/.test(caseCode.trim())) return { success: false, error: 'كود القضية غير صالح' };
+        const safeClient = String(clientName || 'عميل').replace(/[<>:"/\\|?*]/g, '_');
+        const targetDir = path.join(app.getPath('documents'), 'مكتب المحامي', 'القضايا', `${caseCode.trim()} - ${safeClient}`, 'مستندات العميل');
+        fs.mkdirSync(targetDir, { recursive: true });
+        const copied = [];
+        for (const source of paths) {
+            const originalName = path.basename(source).replace(/[<>:"/\\|?*]/g, '_');
+            const ext = path.extname(originalName);
+            const stem = path.basename(originalName, ext);
+            const targetPath = path.join(targetDir, `${stem}_${Date.now()}_${copied.length + 1}${ext}`);
+            if (mode === 'move') fs.renameSync(source, targetPath); else fs.copyFileSync(source, targetPath);
+            copied.push({ name: path.basename(targetPath), path: targetPath, mode });
+        }
+        return { success: true, files: copied, count: copied.length };
+    } catch (err) { return { success: false, error: err.message }; }
+});
+
+// اختيار مستندات الخدمات المهنية، مع دعم الاختيار المتعدد.
+ipcMain.handle('select-professional-document', async (event) => showFilePicker(event, { properties: ['openFile', 'multiSelections'], filters: [{ name: 'مستندات الملف والمذكرات والصحف', extensions: ['pdf', 'doc', 'docx', 'odt', 'rtf', 'xls', 'xlsx', 'jpg', 'jpeg', 'png', 'webp', 'txt'] }] }));
+
+ipcMain.handle('copy-professional-document', async (event, sourcePaths, fileCode, clientName, fileType, mode = 'copy') => {
+    try {
+        const paths = Array.isArray(sourcePaths) ? sourcePaths : [sourcePaths];
+        if (!paths.length || paths.some(source => !source || !fs.existsSync(source))) return { success: false, error: 'أحد المستندات المصدر غير موجود' };
         if (typeof fileCode !== 'string' || !/^(RE|CT|CO|PI|DR|DC|GR|PR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(fileCode.trim())) return { success: false, error: 'كود الملف غير صالح' };
         const folders = { prosecution_investigation: 'تحقيقات النيابة', detention_renewal: 'تجديد الحبس', dispute_committee: 'لجان فض المنازعات', grievance: 'التظلمات', legal_procedure: 'الإجراءات القانونية', real_estate: 'تسجيل العقارات', contract_writing: 'العقود', company_formation: 'تأسيس الشركات', administrative: 'خدمات إدارية' };
         const dir = path.join(app.getPath('documents'), 'مكتب المحامي', 'الخدمات', folders[fileType] || 'الإجراءات القانونية', `${fileCode} - ${String(clientName || 'عميل').replace(/[<>:"/\|?*]/g, '_')}`, 'مستندات العميل');
         fs.mkdirSync(dir, { recursive: true });
-        const ext = path.extname(sourcePath); const stem = path.basename(sourcePath, ext).replace(/[<>:"/\|?*]/g, '_');
-        const name = `${stem}_${Date.now()}${ext}`; fs.copyFileSync(sourcePath, path.join(dir, name));
-        return { success: true, path: path.join(dir, name), name };
+        const files = [];
+        for (const sourcePath of paths) {
+            const ext = path.extname(sourcePath); const stem = path.basename(sourcePath, ext).replace(/[<>:"/\\|?*]/g, '_');
+            const name = `${stem}_${Date.now()}_${files.length + 1}${ext}`; const target = path.join(dir, name);
+            if (mode === 'move') fs.renameSync(sourcePath, target); else fs.copyFileSync(sourcePath, target);
+            files.push({ path: target, name });
+        }
+        return { success: true, files, count: files.length, path: files[0]?.path, name: files[0]?.name };
     } catch (err) { return { success: false, error: err.message }; }
 });
 
@@ -239,24 +268,6 @@ ipcMain.handle('print-arabic-pdf', async (event, html, filename) => {
         return { success: true, path: save.filePath };
     } catch (err) { return { success: false, error: err.message }; }
     finally { if (printWindow && !printWindow.isDestroyed()) printWindow.close(); }
-});
-
-ipcMain.handle('copy-case-document', async (event, sourcePath, caseCode, clientName) => {
-    try {
-        if (!sourcePath || !fs.existsSync(sourcePath)) return { success: false, error: 'المستند المصدر غير موجود' };
-        if (typeof caseCode !== 'string' || !/^JELR-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}$/.test(caseCode.trim())) return { success: false, error: 'كود القضية غير صالح' };
-        const safeCode = caseCode.trim();
-        const safeClient = String(clientName || 'عميل').replace(/[<>:"/\\|?*]/g, '_');
-        const targetDir = path.join(app.getPath('documents'), 'مكتب المحامي', 'القضايا', `${safeCode} - ${safeClient}`, 'مستندات العميل');
-        fs.mkdirSync(targetDir, { recursive: true });
-        const originalName = path.basename(sourcePath).replace(/[<>:"/\\|?*]/g, '_');
-        const ext = path.extname(originalName);
-        const stem = path.basename(originalName, ext);
-        const targetName = `${stem}_${Date.now()}${ext}`;
-        const targetPath = path.join(targetDir, targetName);
-        fs.copyFileSync(sourcePath, targetPath);
-        return { success: true, path: targetPath, name: targetName };
-    } catch (err) { return { success: false, error: err.message }; }
 });
 
 ipcMain.handle('copy-receipt', async (event, sourcePath, recordId) => {
