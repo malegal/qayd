@@ -941,6 +941,78 @@ window.loadStats = async function() { try { const cases = await db.cases.filter(
 window.printCasePDF = async function() { if (!currentCaseForPrint) return; const rows=(currentCaseForPrint.sessions||[]).map(x=>`<li>${new Date(x.session_date).toLocaleString('ar-EG')} — ${escapeHtml(x.case_status||'')} — ${escapeHtml(x.decision||'')}</li>`).join('')||'<li>لا توجد جلسات مسجلة</li>'; const html=`<html dir="rtl"><meta charset="utf-8"><style>body{font-family:Arial,'Noto Sans Arabic',sans-serif;direction:rtl;padding:30px;color:#172b45}h1{text-align:center;color:#12335b}li{margin:10px 0}</style><h1>تقرير القضية</h1><p>العميل: ${escapeHtml(currentCaseForPrint.client_name)}</p><p>رقم القضية: ${escapeHtml(currentCaseForPrint.case_number)}/${escapeHtml(currentCaseForPrint.case_year)}</p><p>المحكمة: ${escapeHtml(currentCaseForPrint.court_name)}</p><p>كود القضية: ${escapeHtml(currentCaseForPrint.case_code||'')}</p><h2>سجل الجلسات</h2><ul>${rows}</ul></html>`; if (ipcRenderer?.printArabicPdf) await ipcRenderer.printArabicPdf(html, `قضية_${currentCaseForPrint.case_number||'تقرير'}.pdf`); };
 
 // ========== 14. المزامنة مع Supabase ==========
+// تسجيل الدخول إلى Supabase من سطح المكتب باستخدام نفس البريد وPIN المحليين.
+// لا نرسل PIN إلى أي مكان خارج طلب Auth؛ بعد نجاح الدخول تستخدم RPC سياسات المكتب.
+async function ensureDesktopSupabaseSession() {
+    if (!supabaseClient) await initSupabase();
+    if (!supabaseClient || !currentOfficeId) return false;
+    const office = await db.offices.where('office_id').equals(currentOfficeId).first();
+    if (!office?.email || !office?.pin) return false;
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session?.user?.email?.toLowerCase() === String(office.email).toLowerCase()) return true;
+    const { error } = await supabaseClient.auth.signInWithPassword({ email: office.email, password: office.pin });
+    if (error) {
+        console.warn('تعذر تسجيل دخول مزامنة سطح المكتب:', error.message);
+        return false;
+    }
+    return true;
+}
+
+function newSyncOperationId() {
+    return generateUUID();
+}
+
+async function pushDesktopRecord(entityType, entityId, operation, payload) {
+    const { data, error } = await supabaseClient.rpc('apply_mobile_operation', {
+        p_operation_id: newSyncOperationId(),
+        p_office_id: currentOfficeId,
+        p_entity_type: entityType,
+        p_entity_id: String(entityId),
+        p_operation: operation,
+        p_payload: payload,
+        p_base_updated_at: payload.updated_at || null
+    });
+    if (error) throw error;
+    if (data?.status === 'rejected') throw new Error(data.error || `رفضت مزامنة ${entityType}`);
+}
+
+// رفع كل البيانات الموجودة أصلًا في Dexie، وليس العمليات الجديدة فقط.
+// هذا هو مسار الترحيل الأولي المطلوب حتى تظهر بيانات المكتب على الهاتف.
+async function uploadAllLocalOfficeData() {
+    if (!(await ensureDesktopSupabaseSession())) {
+        throw new Error('تعذر تسجيل دخول مالك المكتب إلى Supabase');
+    }
+    const cases = await db.cases.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of cases) await pushDesktopRecord('cases', record.id, 'upsert', record);
+
+    const sessions = await db.sessions.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of sessions) await pushDesktopRecord('sessions', record.id, 'insert', record);
+
+    const tasks = await db.tasks.toArray();
+    for (const record of tasks) await pushDesktopRecord('tasks', record.id, 'insert', { ...record, id: undefined });
+
+    const expenses = await db.expenses.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of expenses) {
+        const payload = { ...record, expense_date: record.expense_date || record.date };
+        await pushDesktopRecord('expenses', record.id, 'insert', payload);
+    }
+
+    const fees = await db.fees.toArray();
+    for (const record of fees) await pushDesktopRecord('fees', record.case_id, 'upsert', record);
+
+    const files = await db.officeFiles.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of files) {
+        const { error } = await supabaseClient.rpc('sync_office_file', { p_file: record });
+        if (error) throw error;
+    }
+
+    const events = await db.fileEvents.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of events) {
+        const { error } = await supabaseClient.rpc('sync_file_event', { p_event: record });
+        if (error) throw error;
+    }
+}
+
 window.syncWithSupabase = async function() {
     if (!navigator.onLine) return Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'أنت غير متصل بالإنترنت', background: '#0f172a', color: '#fff' });
     if (!supabaseClient) await initSupabase();
@@ -948,6 +1020,8 @@ window.syncWithSupabase = async function() {
     await setSupabaseOfficeId(currentOfficeId);
     Swal.fire({ title: 'جاري المزامنة...', allowOutsideClick: false, didOpen: () => Swal.showLoading(), background: '#0f172a', color: '#fff' });
     try {
+        // أولًا نرفع قاعدة المكتب المحلية كاملة حتى لا يظهر الهاتف كمكتب فارغ.
+        await uploadAllLocalOfficeData();
         await uploadToSupabase();
         await downloadFromSupabase();
         updatePendingBadge();
