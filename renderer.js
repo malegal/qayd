@@ -1006,8 +1006,22 @@ async function uploadAllLocalOfficeData() {
     const cases = await db.cases.where('office_id').equals(currentOfficeId).toArray();
     for (const record of cases) await pushDesktopRecord('cases', record.id, 'update', record);
 
+    // لا نرفع العلاقات التابعة قبل التأكد من وجود القضية على الخادم؛
+    // هذا يمنع توقف المزامنة بسبب سجلات أتعاب/جلسات قديمة يتيمة محليًا.
+    const { data: remoteCases, error: remoteCasesError } = await supabaseClient
+        .from('cases').select('id').eq('office_id', currentOfficeId).limit(5000);
+    if (remoteCasesError) throw remoteCasesError;
+    const remoteCaseIds = new Set((remoteCases || []).map((row) => String(row.id)));
+    const skippedRelations = [];
+
     const sessions = await db.sessions.where('office_id').equals(currentOfficeId).toArray();
-    for (const record of sessions) await pushDesktopRecord('sessions', record.id, 'insert', record);
+    for (const record of sessions) {
+        if (!remoteCaseIds.has(String(record.case_id))) {
+            skippedRelations.push(`جلسة ${record.id}`);
+            continue;
+        }
+        await pushDesktopRecord('sessions', record.id, 'insert', record);
+    }
 
     const tasks = await db.tasks.toArray();
     for (const record of tasks) await pushDesktopRecord('tasks', record.id, 'insert', { ...record, id: undefined });
@@ -1015,11 +1029,19 @@ async function uploadAllLocalOfficeData() {
     const expenses = await db.expenses.where('office_id').equals(currentOfficeId).toArray();
     for (const record of expenses) {
         const payload = { ...record, expense_date: record.expense_date || record.date };
+        if (payload.case_id && !remoteCaseIds.has(String(payload.case_id))) delete payload.case_id;
         await pushDesktopRecord('expenses', record.id, 'insert', payload);
     }
 
     const fees = await db.fees.toArray();
-    for (const record of fees) await pushDesktopRecord('fees', record.case_id, 'update', record);
+    for (const record of fees) {
+        if (!remoteCaseIds.has(String(record.case_id))) {
+            skippedRelations.push(`أتعاب القضية ${record.case_id}`);
+            continue;
+        }
+        await pushDesktopRecord('fees', record.case_id, 'update', record);
+    }
+    if (skippedRelations.length) console.warn('تم تجاوز سجلات تابعة لقضايا غير موجودة:', skippedRelations);
 
     const files = await db.officeFiles.where('office_id').equals(currentOfficeId).toArray();
     for (const record of files) {
