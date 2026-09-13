@@ -983,7 +983,7 @@ async function uploadAllLocalOfficeData() {
         throw new Error('تعذر تسجيل دخول مالك المكتب إلى Supabase');
     }
     const cases = await db.cases.where('office_id').equals(currentOfficeId).toArray();
-    for (const record of cases) await pushDesktopRecord('cases', record.id, 'upsert', record);
+    for (const record of cases) await pushDesktopRecord('cases', record.id, 'update', record);
 
     const sessions = await db.sessions.where('office_id').equals(currentOfficeId).toArray();
     for (const record of sessions) await pushDesktopRecord('sessions', record.id, 'insert', record);
@@ -998,7 +998,7 @@ async function uploadAllLocalOfficeData() {
     }
 
     const fees = await db.fees.toArray();
-    for (const record of fees) await pushDesktopRecord('fees', record.case_id, 'upsert', record);
+    for (const record of fees) await pushDesktopRecord('fees', record.case_id, 'update', record);
 
     const files = await db.officeFiles.where('office_id').equals(currentOfficeId).toArray();
     for (const record of files) {
@@ -1041,7 +1041,7 @@ window.syncWithSupabase = async function() {
         }
         Swal.close();
         Swal.fire({ icon: 'success', title: 'تم', text: 'تمت المزامنة', background: '#0f172a', color: '#fff', showConfirmButton: false, timer: 2000 });
-    } catch (err) { console.error(err); Swal.close(); Swal.fire('خطأ', 'فشلت المزامنة', 'error'); }
+    } catch (err) { console.error('فشلت المزامنة:', err); Swal.close(); Swal.fire({ icon: 'error', title: 'فشلت المزامنة', text: err?.message || 'حدث خطأ غير معروف أثناء رفع بيانات المكتب', background: '#0f172a', color: '#fff' }); }
 };
 
 async function uploadToSupabase() {
