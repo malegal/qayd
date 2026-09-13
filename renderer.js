@@ -69,6 +69,11 @@ db.version(7).stores({
     receipts: '++id, record_id, date, name, path'
 });
 
+// دفتر مالي موحد: كل عملية لها نطاق (مكتب/قضية/ملف) ونوع (دخل/مصروف).
+db.version(8).stores({
+    financialTransactions: 'id, office_id, transaction_type, transaction_scope, case_id, office_file_id, transaction_date, category'
+});
+
 let supabaseClient = null;
 let currentOfficeId = null;
 let currentOfficeName = null;
@@ -1033,6 +1038,18 @@ async function uploadAllLocalOfficeData() {
         await pushDesktopRecord('expenses', record.id, 'insert', payload);
     }
 
+    // رفع نسخة دفترية موحدة؛ يظل جدول expenses للتوافق مع الإصدارات القديمة.
+    const ledger = await db.financialTransactions.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of ledger) {
+        const { error } = await supabaseClient.from('financial_transactions').upsert({ ...record, id: record.id, office_id: currentOfficeId }, { onConflict: 'id' });
+        if (error) throw error;
+    }
+    const legacyPayments = await db.payments.toArray();
+    for (const payment of legacyPayments) {
+        const { error } = await supabaseClient.from('financial_transactions').upsert({ id: `legacy-payment-${payment.id}`, office_id: currentOfficeId, transaction_type: 'income', transaction_scope: 'case', case_id: payment.case_id, office_file_id: null, amount: payment.amount, transaction_date: payment.date, category: 'دفعة أتعاب', description: payment.note || '' }, { onConflict: 'id' });
+        if (error) throw error;
+    }
+
     const fees = await db.fees.toArray();
     for (const record of fees) {
         if (!remoteCaseIds.has(String(record.case_id))) {
@@ -1219,8 +1236,8 @@ window.openFeesModal = async function(caseId) {
 };
 window.updateTotalFee = async function() { const newTotal = parseFloat(document.getElementById('feeTotalInput').value) || 0; const fee = await db.fees.get(activeCaseId); if (fee) { fee.total = newTotal; fee.remaining = newTotal - fee.paid; await db.fees.put(fee); document.getElementById('feeRemVal').innerText = fee.remaining.toFixed(2); } };
 window.updateFeeNotes = async function() { const fee = await db.fees.get(activeCaseId); if (fee) { fee.notes = document.getElementById('feeGeneralNotes').value; await db.fees.put(fee); } };
-window.addPayment = async function() { if (!activeCaseId) return; const amount = parseFloat(document.getElementById('payAmount').value); const date = document.getElementById('payDate').value; const note = document.getElementById('payNote').value; if (!amount || amount <= 0 || !date) return Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'أدخل مبلغًا وتاريخًا صحيحين', background: '#0f172a' }); await db.payments.add({ case_id: activeCaseId, amount, date, note }); await openFeesModal(activeCaseId); };
-window.addExpense = async function() { if (!activeCaseId) return; const amount = parseFloat(document.getElementById('expenseAmount').value); const date = document.getElementById('expenseDate').value; const category = document.getElementById('expenseCategory').value.trim(); if (!amount || amount <= 0 || !date) return Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'أدخل قيمة المصروف وتاريخه', background: '#0f172a' }); await db.expenses.add({ office_id: currentOfficeId, owner_id: activeCaseId, case_id: activeCaseId, amount, date, category }); await openFeesModal(activeCaseId); };
+window.addPayment = async function() { if (!activeCaseId) return; const amount = parseFloat(document.getElementById('payAmount').value); const date = document.getElementById('payDate').value; const note = document.getElementById('payNote').value; if (!amount || amount <= 0 || !date) return Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'أدخل مبلغًا وتاريخًا صحيحين', background: '#0f172a' }); await db.payments.add({ case_id: activeCaseId, amount, date, note }); await db.financialTransactions.put({ id: generateUUID(), office_id: currentOfficeId, transaction_type: 'income', transaction_scope: 'case', case_id: activeCaseId, office_file_id: null, amount, transaction_date: date, category: 'دفعة أتعاب', description: note || '', created_at: new Date().toISOString() }); await openFeesModal(activeCaseId); };
+window.addExpense = async function() { if (!activeCaseId) return; const amount = parseFloat(document.getElementById('expenseAmount').value); const date = document.getElementById('expenseDate').value; const category = document.getElementById('expenseCategory').value.trim(); if (!amount || amount <= 0 || !date) return Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'أدخل قيمة المصروف وتاريخه', background: '#0f172a' }); await db.expenses.add({ office_id: currentOfficeId, owner_id: activeCaseId, case_id: activeCaseId, amount, date, category }); await db.financialTransactions.put({ id: generateUUID(), office_id: currentOfficeId, transaction_type: 'expense', transaction_scope: 'case', case_id: activeCaseId, office_file_id: null, amount, transaction_date: date, category: category || 'مصروف', description: '', created_at: new Date().toISOString() }); await openFeesModal(activeCaseId); };
 window.deletePayment = async function(paymentId) { if (confirm('هل أنت متأكد من حذف الدفعة؟')) { await db.payments.delete(paymentId); await openFeesModal(activeCaseId); } };
 window.deleteExpense = async function(expenseId) { if (confirm('هل أنت متأكد من حذف المصروف؟')) { await db.expenses.delete(expenseId); await openFeesModal(activeCaseId); } };
 
@@ -1230,18 +1247,13 @@ window.printFeesPDF = async function() { if (!activeCaseId) return; const c=awai
 let financeRows = [];
 function money(value) { return (Number(value) || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 async function getFinanceRows() {
+    const ledger = await db.financialTransactions.where('office_id').equals(currentOfficeId).toArray();
     const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).toArray();
     const files = await db.officeFiles.filter(f => !f.archived && f.office_id === currentOfficeId).toArray();
-    const rows = [];
-    for (const record of [...cases.map(c => ({ ...c, record_kind: 'judicial', record_id: c.id, title: `قضية ${c.case_number || ''}/${c.case_year || ''}`, service: `${c.court_name || '-'}${c.circuit ? ` / ${c.circuit}` : ''}`, code: c.case_code || '' })), ...files.map(f => ({ ...f, record_kind: 'professional', record_id: f.id, title: f.title || professionalTypeLabel(f.file_type), service: professionalTypeLabel(f.file_type), code: f.file_code || '' }))]) {
-        const fee = await db.fees.get(record.record_id) || { total: 0 };
-        const payments = await db.payments.where('case_id').equals(record.record_id).toArray();
-        const expenses = await db.expenses.where('case_id').equals(record.record_id).toArray();
-        const collected = payments.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-        const spent = expenses.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-        rows.push({ ...record, total: Number(fee.total) || 0, collected, spent, profit: collected - spent });
-    }
-    return rows;
+    const records = [...cases.map(c => ({ ...c, record_kind: 'judicial', record_id: c.id, title: `قضية ${c.case_number || ''}/${c.case_year || ''}`, service: `${c.court_name || '-'}${c.circuit ? ` / ${c.circuit}` : ''}`, code: c.case_code || '', scope: 'case' })), ...files.map(f => ({ ...f, record_kind: 'professional', record_id: f.id, title: f.title || professionalTypeLabel(f.file_type), service: professionalTypeLabel(f.file_type), code: f.file_code || '', scope: 'file' }))];
+    const rows = records.map(record => { const related = ledger.filter(x => (record.scope === 'case' ? x.case_id === record.record_id : x.office_file_id === record.record_id)); const total = related.filter(x => x.transaction_type === 'income').reduce((n,x) => n + Number(x.amount || 0), 0); const spent = related.filter(x => x.transaction_type === 'expense').reduce((n,x) => n + Number(x.amount || 0), 0); return { ...record, total, collected: total, spent, profit: total - spent }; });
+    const office = ledger.filter(x => x.transaction_scope === 'office');
+    rows.unshift({ record_kind: 'office', record_id: 'office', client_name: 'المكتب', title: 'الحساب العام للمكتب', service: 'مصروفات ونفقات المكتب', code: 'OFFICE', total: office.filter(x => x.transaction_type === 'income').reduce((n,x) => n+Number(x.amount||0),0), collected: office.filter(x => x.transaction_type === 'income').reduce((n,x) => n+Number(x.amount||0),0), spent: office.filter(x => x.transaction_type === 'expense').reduce((n,x) => n+Number(x.amount||0),0) }); rows[0].profit = rows[0].collected - rows[0].spent; return rows;
 }
 function renderFinanceRows(rows) {
     const body = document.getElementById('financeTableBody');
