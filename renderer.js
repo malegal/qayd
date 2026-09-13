@@ -1046,12 +1046,10 @@ async function uploadAllLocalOfficeData() {
     }
     const legacyPayments = await db.payments.toArray();
     for (const payment of legacyPayments) {
-        // payment.id رقم محلي وليس UUID؛ نحفظ UUID صالحًا وثابتًا حتى لا تتكرر الدفعة عند إعادة المزامنة.
-        let legacyLedger = await db.financialTransactions.filter(t => t.legacy_payment_id === payment.id).first();
-        if (!legacyLedger) {
-            legacyLedger = { id: generateUUID(), legacy_payment_id: payment.id, office_id: currentOfficeId, transaction_type: 'income', transaction_scope: 'case', case_id: payment.case_id, office_file_id: null, amount: payment.amount, transaction_date: payment.date, category: 'دفعة أتعاب', description: payment.note || '' };
-            await db.financialTransactions.put(legacyLedger);
-        }
+        // payment.id رقم محلي وليس UUID؛ نشتق منه UUID صالحًا وثابتًا، ولا نرسل أي حقل محلي إضافي إلى Supabase.
+        const numericId = Math.abs(Number(payment.id) || 0).toString(16).padStart(12, '0').slice(-12);
+        const legacyId = `00000000-0000-0000-0000-${numericId}`;
+        const legacyLedger = { id: legacyId, office_id: currentOfficeId, transaction_type: 'income', transaction_scope: 'case', case_id: payment.case_id, office_file_id: null, amount: payment.amount, transaction_date: payment.date, category: 'دفعة أتعاب', description: payment.note || '' };
         const { error } = await supabaseClient.from('financial_transactions').upsert(legacyLedger, { onConflict: 'id' });
         if (error) throw error;
     }
