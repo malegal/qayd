@@ -4,9 +4,30 @@ window.onerror = function(message, source, lineno, colno, error) {
     Swal.fire({ icon: 'error', title: 'خطأ غير متوقع', text: message, background: '#0f172a', color: '#fff' });
     return false;
 };
+let storageRepairPromptShown = false;
+async function offerIndexedDbRepair(error) {
+    if (storageRepairPromptShown) return;
+    storageRepairPromptShown = true;
+    const result = await Swal.fire({
+        icon: 'error',
+        title: 'مشكلة في قاعدة البيانات المحلية',
+        text: 'تعذر فتح مخزن البيانات المحلي. سيتم حفظ نسخة احتياطية ثم إعادة تهيئة المخزن فقط إذا وافقت.',
+        showCancelButton: true,
+        confirmButtonText: 'إصلاح مع نسخة احتياطية',
+        cancelButtonText: 'إغلاق',
+        background: '#0f172a', color: '#fff'
+    });
+    if (!result.isConfirmed || !ipcRenderer?.repairIndexedDB) return;
+    const repaired = await ipcRenderer.repairIndexedDB();
+    if (!repaired?.success) return Swal.fire('تعذر الإصلاح', repaired?.error || 'تعذر إنشاء النسخة الاحتياطية', 'error');
+    Swal.fire({ icon: 'success', title: 'تم حفظ النسخة الاحتياطية', text: 'سيعاد تشغيل التطبيق الآن لإعادة إنشاء قاعدة البيانات المحلية.', timer: 1800, showConfirmButton: false, background: '#0f172a', color: '#fff' })
+        .then(() => location.reload());
+}
 window.onunhandledrejection = function(event) {
     console.error('وعد غير معالج:', event.reason);
-    Swal.fire({ icon: 'error', title: 'خطأ غير معالج', text: event.reason?.message || 'خطأ غير معروف', background: '#0f172a', color: '#fff' });
+    const message = event.reason?.message || String(event.reason || '');
+    if (/backing store|indexedDB|IndexedDB/i.test(message)) return offerIndexedDbRepair(event.reason);
+    Swal.fire({ icon: 'error', title: 'خطأ غير معالج', text: message || 'خطأ غير معروف', background: '#0f172a', color: '#fff' });
 };
 
 // ========== 1. الإعدادات وقواعد البيانات ==========

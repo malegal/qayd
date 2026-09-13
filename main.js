@@ -2,6 +2,20 @@ const { app, BrowserWindow, ipcMain, Notification, shell, dialog } = require('el
 const path = require('path');
 const fs = require('fs');
 
+// منع تشغيل نسختين من Electron على نفس قاعدة IndexedDB؛ تعدد النسخ قد يسبب
+// Internal error opening backing store في Linux عند فتح LawDeskDB.
+const singleInstanceLock = app.requestSingleInstanceLock();
+if (!singleInstanceLock) {
+    app.quit();
+} else {
+    app.on('second-instance', () => {
+        if (!mainWindow) return;
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+    });
+}
+
 let mainWindow;
 
 // يجب أن يستخدم تطبيق qayd نفس مشروع Supabase الثابت الذي يقرأ منه موقع ostazlaw وصفحة «تابع قضيتك».
@@ -35,6 +49,20 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
+});
+
+// إصلاح مخزن IndexedDB عند تلفه: نعيد تسمية المجلد كنسخة احتياطية
+// قبل إنشاء مخزن جديد، حتى تظل ملفات البيانات القديمة متاحة للاسترجاع.
+ipcMain.handle('repair-indexeddb', async () => {
+    try {
+        const indexedDbPath = path.join(app.getPath('userData'), 'IndexedDB');
+        if (!fs.existsSync(indexedDbPath)) return { success: true, backupPath: null };
+        const backupPath = `${indexedDbPath}.backup-${Date.now()}`;
+        fs.renameSync(indexedDbPath, backupPath);
+        return { success: true, backupPath };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
 });
 
 // ========== دوال المجلدات والقوالب (كما هي) ==========

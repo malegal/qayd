@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+    repairIndexedDB: () => ipcRenderer.invoke('repair-indexeddb'),
   // إدارة المجلدات
   createCaseFolder: (caseCode, clientName, caseData) => ipcRenderer.invoke('create-case-folder', caseCode, clientName, caseData),
                                 openCaseFolder: (folderName) => ipcRenderer.invoke('open-case-folder', folderName),
