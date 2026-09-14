@@ -476,7 +476,7 @@ window.verifyPin = async function() {
         currentOfficeName = offices[0].office_name;
         updateSidebarOfficeName(currentOfficeName);
 
-        if (!DEV_MODE) {
+        if (!DEV_MODE && !isOwnerEmail(offices[0].email)) {
             const licenseKey = offices[0].license_key;
             if (!licenseKey) {
                 Swal.fire('تنبيه', 'لا يوجد ترخيص صالح لهذا المكتب', 'warning');
