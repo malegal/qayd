@@ -74,6 +74,14 @@ db.version(8).stores({
     financialTransactions: 'id, office_id, transaction_type, transaction_scope, case_id, office_file_id, transaction_date, category'
 });
 
+// فهارس داخلية لحفظ معرفات Supabase مع جداول Dexie القديمة ذات المفاتيح التلقائية.
+// لا تغيّر هذه الإضافة الحقول المعروضة أو طريقة استخدام سطح المكتب.
+db.version(9).stores({
+    tasks: '++id, office_id, remote_id, description, date, completed',
+    expenses: '++id, office_id, remote_id, owner_id, case_id, amount, date, category',
+    payments: '++id, remote_id, case_id, amount, date, note'
+});
+
 let supabaseClient = null;
 let currentOfficeId = null;
 let currentOfficeName = null;
@@ -1029,13 +1037,19 @@ async function uploadAllLocalOfficeData() {
     }
 
     const tasks = await db.tasks.toArray();
-    for (const record of tasks) await pushDesktopRecord('tasks', record.id, 'insert', { ...record, id: undefined });
+    for (const record of tasks) {
+        const remoteId = record.remote_id || generateUUID();
+        if (!record.remote_id) await db.tasks.update(record.id, { remote_id: remoteId });
+        await pushDesktopRecord('tasks', remoteId, 'insert', { ...record, id: undefined, remote_id: undefined });
+    }
 
     const expenses = await db.expenses.where('office_id').equals(currentOfficeId).toArray();
     for (const record of expenses) {
         const payload = { ...record, expense_date: record.expense_date || record.date };
         if (payload.case_id && !remoteCaseIds.has(String(payload.case_id))) delete payload.case_id;
-        await pushDesktopRecord('expenses', record.id, 'insert', payload);
+        const remoteId = record.remote_id || generateUUID();
+        if (!record.remote_id) await db.expenses.update(record.id, { remote_id: remoteId });
+        await pushDesktopRecord('expenses', remoteId, 'insert', { ...payload, id: undefined, remote_id: undefined });
     }
 
     // رفع نسخة دفترية موحدة؛ يظل جدول expenses للتوافق مع الإصدارات القديمة.
@@ -1094,6 +1108,10 @@ window.syncWithSupabase = async function() {
         loadUpcomingSessions('week');
         renderCalendar();
 
+        if (activeCaseId && document.getElementById('feesModal')?.classList.contains('show')) {
+            await openFeesModal(activeCaseId);
+        }
+
         if (activeCaseId) {
             const updatedCase = await db.cases.get(activeCaseId);
             if (updatedCase) {
@@ -1104,7 +1122,13 @@ window.syncWithSupabase = async function() {
             }
         }
         Swal.close();
-        Swal.fire({ icon: 'success', title: 'تم', text: 'تمت المزامنة', background: '#0f172a', color: '#fff', showConfirmButton: false, timer: 2000 });
+        const [syncedCases, syncedSessions, syncedTasks, syncedLedger] = await Promise.all([
+            db.cases.where('office_id').equals(currentOfficeId).count(),
+            db.sessions.where('office_id').equals(currentOfficeId).count(),
+            db.tasks.where('office_id').equals(currentOfficeId).count(),
+            db.financialTransactions.where('office_id').equals(currentOfficeId).count()
+        ]);
+        Swal.fire({ icon: 'success', title: 'تم', text: `تمت المزامنة — قضايا: ${syncedCases} · جلسات: ${syncedSessions} · مهام: ${syncedTasks} · حركات مالية: ${syncedLedger}`, background: '#0f172a', color: '#fff', showConfirmButton: false, timer: 3500 });
     } catch (err) { console.error('فشلت المزامنة:', err); Swal.close(); Swal.fire({ icon: 'error', title: 'فشلت المزامنة', text: err?.message || 'حدث خطأ غير معروف أثناء رفع بيانات المكتب', background: '#0f172a', color: '#fff' }); }
 };
 
@@ -1202,6 +1226,54 @@ async function downloadFromSupabase() {
             if (existing) await db.sessions.update(s.id, s);
             else await db.sessions.add(s);
         }
+    }
+
+    // الجداول التالية تُنزّل أيضًا حتى تظهر حركات الهاتف داخل سطح المكتب.
+    const { data: remoteTasks, error: tasksError } = await supabaseClient.from('tasks').select('*').eq('office_id', currentOfficeId).limit(5000);
+    if (tasksError) console.error('خطأ في تحميل المهام:', tasksError);
+    for (const task of remoteTasks || []) {
+        const existing = await db.tasks.where('remote_id').equals(String(task.id)).first();
+        const local = { ...task, remote_id: String(task.id), id: existing?.id };
+        if (existing) await db.tasks.update(existing.id, local);
+        else { delete local.id; await db.tasks.add(local); }
+    }
+
+    const { data: remoteExpenses, error: expensesError } = await supabaseClient.from('expenses').select('*').eq('office_id', currentOfficeId).limit(5000);
+    if (expensesError) console.error('خطأ في تحميل المصروفات:', expensesError);
+    for (const expense of remoteExpenses || []) {
+        const existing = await db.expenses.where('remote_id').equals(String(expense.id)).first();
+        const local = { ...expense, remote_id: String(expense.id), id: existing?.id, date: expense.date || expense.expense_date };
+        if (existing) await db.expenses.update(existing.id, local);
+        else { delete local.id; await db.expenses.add(local); }
+    }
+
+    const { data: remoteFees, error: feesError } = await supabaseClient.from('fees').select('*').limit(5000);
+    if (feesError) console.error('خطأ في تحميل الأتعاب:', feesError);
+    for (const fee of remoteFees || []) {
+        const caseRow = await db.cases.get(fee.case_id);
+        if (caseRow?.office_id !== currentOfficeId) continue;
+        const existing = await db.fees.get(fee.case_id);
+        if (existing) await db.fees.update(fee.case_id, fee);
+        else await db.fees.put(fee);
+    }
+
+    const { data: remotePayments, error: paymentsError } = await supabaseClient.from('payments').select('*').limit(5000);
+    if (paymentsError) console.error('خطأ في تحميل المدفوعات:', paymentsError);
+    for (const payment of remotePayments || []) {
+        const caseRow = await db.cases.get(payment.case_id);
+        if (caseRow?.office_id !== currentOfficeId) continue;
+        const existing = await db.payments.where('remote_id').equals(String(payment.id)).first();
+        const local = { ...payment, remote_id: String(payment.id), id: existing?.id };
+        if (existing) await db.payments.update(existing.id, local);
+        else { delete local.id; await db.payments.add(local); }
+    }
+
+    const { data: remoteLedger, error: ledgerError } = await supabaseClient.from('financial_transactions').select('*').eq('office_id', currentOfficeId).limit(5000);
+    if (ledgerError) console.error('خطأ في تحميل دفتر المالية:', ledgerError);
+    for (const record of remoteLedger || []) {
+        const existing = await db.financialTransactions.get(record.id);
+        if (existing) await db.financialTransactions.update(record.id, record);
+        else await db.financialTransactions.put(record);
     }
 }
 
