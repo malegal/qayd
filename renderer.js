@@ -1132,6 +1132,23 @@ window.syncWithSupabase = async function() {
     } catch (err) { console.error('فشلت المزامنة:', err); Swal.close(); Swal.fire({ icon: 'error', title: 'فشلت المزامنة', text: err?.message || 'حدث خطأ غير معروف أثناء رفع بيانات المكتب', background: '#0f172a', color: '#fff' }); }
 };
 
+let backgroundSyncInFlight = false;
+async function runBackgroundSync() {
+    if (backgroundSyncInFlight || !currentOfficeId || !navigator.onLine || !supabaseClient) return;
+    backgroundSyncInFlight = true;
+    try {
+        await uploadAllLocalOfficeData();
+        await uploadToSupabase();
+        await downloadFromSupabase();
+        updatePendingBadge();
+        await Promise.all([loadStats(), loadCasesList(), loadUpcomingSessions('week'), renderCalendar()]);
+    } catch (error) {
+        console.warn('المزامنة الخلفية مؤجلة:', error?.message || error);
+    } finally {
+        backgroundSyncInFlight = false;
+    }
+}
+
 async function uploadToSupabase() {
     const pendingOps = await db.pendingOperations.toArray();
     for (let op of pendingOps) {
@@ -1542,6 +1559,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     await initSupabase();
     const hasOffice = await checkOfficeSetup();
     if (!hasOffice) showModal('officeSetupModal');
+    if (hasOffice) {
+        runBackgroundSync();
+        setInterval(runBackgroundSync, 60 * 1000);
+        window.addEventListener('focus', runBackgroundSync);
+        window.addEventListener('online', runBackgroundSync);
+    }
 });
 
 // ========== 20. مودال الإعدادات (إضافة هذه الدالة في النهاية) ==========
