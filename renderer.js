@@ -801,7 +801,7 @@ window.loadUpcomingSessions = async function(range, btn) {
         let html = '';
         for (let s of sessions) {
             const c = await db.cases.get(s.case_id);
-            if (c) html += `<div class="session-card" onclick="openCaseDetails('${c.id}')"><div class="d-flex justify-content-between"><span class="gold-text">${new Date(s.session_date).toLocaleString('ar-EG', { dateStyle: 'full', timeStyle: 'short' })}</span><span class="case-status status-new">${s.case_status}</span></div><div class="mt-2"><strong>${c.client_name}</strong> - ${c.case_number}/${c.case_year}</div><div class="mt-1 text-white">${s.decision || ''}</div></div>`;
+            if (c) html += `<div class="session-card" onclick="openCaseDetails('${c.id}')"><div class="d-flex justify-content-between"><span class="gold-text">${new Date(s.session_date).toLocaleString('ar-EG', { dateStyle: 'full', timeStyle: 'short' })}</span><span class="case-status status-new">${s.case_status}</span></div><div class="mt-2"><strong>${c.client_name || 'عميل غير مسجل'}</strong> - ${c.case_number || 'رقم غير مسجل'}${c.case_year ? '/' + c.case_year : ''}</div><div class="mt-1 text-white-50">${c.court_name || 'محكمة غير مسجلة'} · ${c.circuit || 'دائرة غير مسجلة'}</div><div class="mt-1 text-white">${s.decision || ''}</div></div>`;
         }
         document.getElementById('upcomingSessionsList').innerHTML = html || '<div class="text-muted">لا توجد جلسات في هذه الفترة</div>';
     } catch (e) { }
