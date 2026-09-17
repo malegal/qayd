@@ -46,6 +46,7 @@
         .login-box { width: 450px; padding: 2rem; background: rgba(255,255,255,0.96); backdrop-filter: blur(10px); border: 1px solid var(--gold-solid); border-radius: 1.5rem; text-align: center; }
         #sidebar { position: fixed; top: 0; right: 0; width: var(--sidebar-width); height: 100vh; background: var(--sidebar-dark); border-left: 1px solid var(--border-color); display: flex; flex-direction: column; z-index: 1000; }
         .sidebar-brand { padding: 1.2rem 0.8rem; text-align: center; border-bottom: 1px solid var(--border-color); }
+        .qayd-mark { width: 54px; height: 54px; margin: 0 auto 0.6rem; border-radius: 17px; display: flex; align-items: center; justify-content: center; background: linear-gradient(145deg, #0b2f67, #16899a); color: #d5b04c; font-size: 2rem; font-weight: 900; box-shadow: 0 5px 16px rgba(0,0,0,.25); }
         .sidebar-brand div { line-height: 1.4; }
         .nav-pills { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 0.5rem 0; }
         .nav-pills .nav-link { color: var(--text-muted); padding: 0.8rem 1.2rem; font-size: 0.95rem; border-radius: 0; display: flex; align-items: center; gap: 12px; transition: 0.2s; width: 100%; text-align: right; background: transparent; border: none; cursor: pointer; }
@@ -179,6 +180,7 @@
     <!-- الشريط الجانبي (مبسط) -->
     <div id="sidebar">
         <div class="sidebar-brand">
+            <div class="qayd-mark" aria-label="Qayd">Q</div>
             <div class="text-white-50 small mb-1">مكتب</div>
             <div class="gold-text fs-5 fw-bold mb-1" id="sidebarOfficeName">اسم المحامي</div>
             <div class="text-white-50 small">المحامي</div>
@@ -202,6 +204,7 @@
             <button class="btn btn-outline-warning w-100 mb-2" id="activateLicenseBtn" style="display: none;" onclick="showLicenseModal()">
                 <i class="bi bi-unlock"></i> تفعيل الترخيص
             </button>
+            <button class="btn btn-outline-warning w-100 mb-2" id="teamManagementBtn" style="display:none" onclick="showTeamManagement()"><i class="bi bi-people"></i> إدارة الفريق</button>
             <!-- زر الإعدادات -->
             <button class="btn btn-outline-secondary w-100" onclick="showSettingsModal()">
                 <i class="bi bi-gear"></i> الإعدادات
@@ -658,6 +661,7 @@ label, .form-label { color:var(--text) !important; font-weight:700; }
 @media(max-width:600px){.finance-summary-grid{grid-template-columns:1fr}.page-heading{display:block}}
 .professional-file-row { background:#ffffff; color:var(--text, #172b45); border-color:var(--border, #d8e1ec); }.record-detail { color:var(--text); font-size:1rem; }.record-code { background:var(--navy); color:#fff; border-radius:8px; padding:10px 14px; font-weight:800; margin-bottom:12px; direction:rtl; }.record-row { padding:7px 0; border-bottom:1px solid var(--border); }.record-row strong { color:var(--navy); }.party-card { background:#f8fafc; border:1px solid var(--border); border-right:4px solid var(--gold); border-radius:10px; padding:12px; margin:12px 0; }.party-card h6 { font-weight:800; }.party-card strong { color:var(--navy); }.detail-action-grid { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }.detail-action-grid .btn { flex:1 1 auto; min-width:120px; }
 </style>
+<div class="modal fade" id="teamManagementModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title gold-text">إدارة فريق المكتب</h5></div><div class="modal-body"><label>البريد أو الهاتف</label><input id="teamInviteContact" class="form-control mb-3" placeholder="member@example.com"><label>الدور</label><select id="teamInviteRole" class="form-select mb-3"><option value="lawyer">محامي</option><option value="staff">سكرتيرة</option><option value="accountant">محاسب</option></select><button class="gold-btn w-100" onclick="createDesktopInvite()">إنشاء كود الدعوة</button><div id="teamInviteResult" class="text-center fw-bold mt-3"></div><hr><button class="btn btn-outline-warning w-100" onclick="createDesktopRecoveryCodes()">إنشاء رموز استرداد المالك</button><pre id="teamRecoveryResult" class="mt-3"></pre></div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button></div></div></div></div>
 <script src="renderer.js"></script>
 </body>
 </html>
