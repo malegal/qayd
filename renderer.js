@@ -983,12 +983,22 @@ async function ensureDesktopSupabaseSession() {
     const office = await db.offices.where('office_id').equals(currentOfficeId).first();
     if (!office?.email || !office?.pin) return false;
     const { data: { session } } = await supabaseClient.auth.getSession();
-    if (session?.user?.email?.toLowerCase() === String(office.email).toLowerCase()) return true;
-    const { error } = await supabaseClient.auth.signInWithPassword({ email: office.email, password: office.pin });
+    if (session?.user?.email?.toLowerCase() === String(office.email).toLowerCase()) {
+        const { error: claimError } = await supabaseClient.rpc('claim_existing_office_as_owner', { p_office_id: currentOfficeId });
+        if (claimError) console.warn('تعذر ربط المكتب بدور المالك:', claimError.message);
+        return true;
+    }
+    let { error } = await supabaseClient.auth.signInWithPassword({ email: office.email, password: office.pin });
+    if (error && office.email && office.pin) {
+        const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({ email: office.email, password: office.pin });
+        if (!signUpError && signUpData.session) error = null;
+    }
     if (error) {
         console.warn('تعذر تسجيل دخول مزامنة سطح المكتب:', error.message);
         return false;
     }
+    const { error: claimError } = await supabaseClient.rpc('claim_existing_office_as_owner', { p_office_id: currentOfficeId });
+    if (claimError) console.warn('تعذر ربط المكتب بدور المالك:', claimError.message);
     return true;
 }
 
