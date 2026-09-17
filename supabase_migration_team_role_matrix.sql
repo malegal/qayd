@@ -52,6 +52,21 @@ drop policy if exists financial_transactions_insert_member on public.financial_t
 drop policy if exists financial_transactions_update_member on public.financial_transactions;
 
 -- Owner is the only role allowed to modify or delete existing records.
+-- All internal roles may create a new case; only the owner may later edit/delete it.
+create policy cases_member_insert on public.cases for insert to authenticated
+  with check (public.can_office_role(office_id, array['manager','lawyer','staff','accountant']));
+
+-- Procedures/follow-ups are represented by file_events in the shared schema.
+create policy file_events_member_select on public.file_events for select to authenticated
+  using (public.is_office_member(office_id));
+create policy file_events_operational_insert on public.file_events for insert to authenticated
+  with check (public.can_office_role(office_id, array['manager','lawyer','staff','accountant']));
+create policy file_events_owner_update on public.file_events for update to authenticated
+  using (public.can_office_role(office_id, array['manager']))
+  with check (public.can_office_role(office_id, array['manager']));
+create policy file_events_owner_delete on public.file_events for delete to authenticated
+  using (public.can_office_role(office_id, array['manager']));
+
 create policy cases_owner_update on public.cases for update to authenticated
   using (public.can_office_role(office_id, array['manager']))
   with check (public.can_office_role(office_id, array['manager']));
