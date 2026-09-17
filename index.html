@@ -151,6 +151,13 @@
         #sidebar .btn-outline-secondary:hover, #sidebar .btn-outline-secondary:focus { color: #172235 !important; border-color: #f1cc69 !important; background: #f1cc69 !important; box-shadow: 0 4px 14px rgba(241,204,105,.24); }
         #sidebar #licenseStatus { color: #ffffff !important; opacity: 1 !important; }
 </style>
+
+<style>
+  #sidebar { overflow-x: hidden; }
+  #sidebar .sidebar-tabs { overflow-x: visible; width: 100%; }
+  #sidebar .sidebar-tabs .nav-link { width: calc(100% - 20px); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+  #sidebar .sidebar-settings-btn { width: 42px; height: 42px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
+</style>
 </head>
 <body data-bs-theme="light">
 
@@ -180,12 +187,11 @@
     <!-- الشريط الجانبي (مبسط) -->
     <div id="sidebar">
         <div class="sidebar-brand">
-            <div class="qayd-mark" aria-label="Qayd">Q</div>
             <div class="text-white-50 small mb-1">مكتب</div>
             <div class="gold-text fs-5 fw-bold mb-1" id="sidebarOfficeName">اسم المحامي</div>
             <div class="text-white-50 small">المحامي</div>
         </div>
-        <div class="nav flex-column nav-pills" role="tablist">
+        <div class="nav flex-column nav-pills sidebar-tabs" role="tablist">
             <button class="nav-link active" id="agenda-tab" data-bs-target="#agendaTab" type="button" role="tab" onclick="renderCalendar()"><i class="bi bi-calendar3 fs-5"></i> الأجندة</button>
             <button class="nav-link" id="cases-tab" data-bs-target="#cases" type="button" role="tab" onclick="loadCasesList()"><i class="bi bi-briefcase fs-5"></i> إدارة الملفات</button>
             <!-- تبويب موحّد للأتعاب والمصروفات؛ كان مكرراً في القائمة الجانبية وتم الإبقاء على رابط واحد فقط. -->
@@ -587,6 +593,9 @@
                 </button>
                 <button class="btn btn-outline-warning w-100 mb-2" onclick="syncWithSupabase(); hideModal('settingsModal');">
                     <i class="bi bi-arrow-repeat"></i> مزامنة البيانات
+                </button>
+                <button class="btn btn-outline-warning w-100 mb-2" id="settingsTeamBtn" onclick="showTeamManagement(); hideModal('settingsModal');">
+                    <i class="bi bi-people"></i> إدارة فريق المكتب
                 </button>
                 <button class="btn btn-outline-danger w-100" onclick="resetApp(); hideModal('settingsModal');">
                     <i class="bi bi-trash"></i> إعادة تعيين التطبيق (مسح البيانات)
