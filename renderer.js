@@ -90,6 +90,8 @@ let currentOfficeId = null;
 let currentOfficeName = null;
 let activeCaseId = null, activeSessionId = null, currentCaseForPrint = null, currentDate = new Date();
 let currentSelectedDateStr = null, rescheduleSessionId = null;
+let caseSaveInFlight = false;
+let sessionSaveInFlight = false;
 
 const OWNER_EMAIL = 'mahmoud.abdelhamyd@gmail.com';
 const OWNER_LICENSE_KEY = 'OWNER-PERMANENT-QAYD';
@@ -658,6 +660,16 @@ function assertValidCaseCode(caseCode) {
 
 window.openAddCaseModal = () => showModal('addCaseModal');
 window.saveNewCase = async function() {
+    if (caseSaveInFlight) return Swal.fire('انتظر', 'جاري حفظ القضية بالفعل، لا تضغط الحفظ مرة أخرى.', 'info');
+    caseSaveInFlight = true;
+    const saveButton = document.querySelector('#addCaseModal button[onclick="saveNewCase()"]');
+    if (saveButton) { saveButton.disabled = true; saveButton.dataset.originalText = saveButton.innerText; saveButton.innerText = 'جاري الحفظ...'; }
+    try {
+    const duplicateNumber = document.getElementById('case_number').value.trim();
+    const duplicateYear = document.getElementById('case_year').value.trim();
+    const duplicateCourt = document.getElementById('court_name').value.trim();
+    const duplicate = await db.cases.filter(c => c.office_id === currentOfficeId && !c.archived && String(c.case_number || '').trim() === duplicateNumber && String(c.case_year || '').trim() === duplicateYear && String(c.court_name || '').trim() === duplicateCourt).first();
+    if (duplicate) { throw new Error(`هذه القضية مسجلة بالفعل بالكود ${duplicate.case_code || duplicate.id}`); }
     const caseData = {
         id: 'C_' + Date.now(),
         office_id: currentOfficeId,
@@ -727,6 +739,13 @@ window.saveNewCase = async function() {
     document.getElementById('feesSectionModal').style.display = 'none';
     loadCasesList();
     updatePendingBadge();
+    } catch (error) {
+        console.error('فشل حفظ القضية:', error);
+        Swal.fire('تعذر الحفظ', error?.message || 'حدث خطأ أثناء حفظ القضية', 'error');
+    } finally {
+        caseSaveInFlight = false;
+        if (saveButton) { saveButton.disabled = false; saveButton.innerText = saveButton.dataset.originalText || 'حفظ القضية'; }
+    }
 };
 window.toggleFeesSectionModal = function() { let s = document.getElementById('feesSectionModal'); if (s) s.style.display = s.style.display === 'none' ? 'block' : 'none'; };
 
@@ -786,13 +805,21 @@ window.selectCaseForSession = async function(id) {
     } catch (e) { }
 };
 window.saveSession = async function() {
+    if (sessionSaveInFlight) return Swal.fire('انتظر', 'جاري حفظ الجلسة بالفعل.', 'info');
     if (!activeCaseId || !document.getElementById('s_date').value) { Swal.fire('تنبيه', 'اختر قضية وأدخل التاريخ', 'warning'); return; }
+    sessionSaveInFlight = true;
+    const sessionButton = document.querySelector('#sessions button[onclick="saveSession()"]');
+    if (sessionButton) { sessionButton.disabled = true; sessionButton.dataset.originalText = sessionButton.innerText; sessionButton.innerText = 'جاري الحفظ...'; }
+    try {
     const sessionData = { id: 'S_' + Date.now(), office_id: currentOfficeId, case_id: activeCaseId, session_date: document.getElementById('s_date').value, case_status: document.getElementById('s_case_status').value, decision: document.getElementById('s_decision').value };
+    const duplicate = await db.sessions.filter(s => s.office_id === currentOfficeId && s.case_id === activeCaseId && s.session_date === sessionData.session_date).first();
+    if (duplicate) throw new Error('هذه الجلسة مسجلة بالفعل لنفس القضية والتاريخ.');
     await db.sessions.add(sessionData);
     await db.pendingOperations.add({ operation: 'insert_session', data: sessionData, timestamp: Date.now() });
     Swal.fire({ icon: 'success', title: 'تم الحفظ محلياً', background: '#0f172a', showConfirmButton: false, timer: 1500 });
     document.getElementById('s_decision').value = '';
     loadUpcomingSessions('week'); renderCalendar(); updatePendingBadge();
+    } catch (error) { Swal.fire('تعذر الحفظ', error?.message || 'حدث خطأ أثناء حفظ الجلسة', 'error'); } finally { sessionSaveInFlight = false; if (sessionButton) { sessionButton.disabled = false; sessionButton.innerText = sessionButton.dataset.originalText || 'حفظ الجلسة'; } }
 };
 window.loadUpcomingSessions = async function(range, btn) {
     if (btn) { document.querySelectorAll('#sessions .btn-group .btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }
@@ -881,14 +908,17 @@ window.showDayDetails = async function(dateStr) {
         for (let e of events) html += `<div class="p-2 mb-2 bg-dark rounded border border-success d-flex justify-content-between align-items-center gap-2"><span>${escapeHtml(e.title)}</span><span class="text-nowrap"><button class="btn btn-sm btn-outline-warning" onclick="openEditEvent(${e.id})" title="تعديل"><i class="bi bi-pencil"></i></button><button class="btn btn-sm btn-outline-danger ms-1" onclick="deleteEvent(${e.id})" title="حذف"><i class="bi bi-trash"></i></button></span></div>`;
         html += `<hr class="border-secondary"><h6 class="gold-text"><i class="bi bi-list-check"></i> المهام</h6>`;
         if (tasks.length === 0) html += `<p class="small text-muted">لا يوجد</p>`;
-        for (let t of tasks) html += `<div class="p-2 mb-2 bg-dark rounded border border-warning d-flex justify-content-between align-items-center"><span style="text-decoration:${t.completed ? 'line-through' : 'none'}">${t.description}</span><input type="checkbox" ${t.completed ? 'checked' : ''} onchange="toggleTask('${t.id}', this.checked)"></div>`;
+        for (let t of tasks) html += `<div class="p-2 mb-2 bg-dark rounded border border-warning d-flex justify-content-between align-items-center gap-2"><span style="text-decoration:${t.completed ? 'line-through' : 'none'}">${escapeHtml(t.description)}</span><span class="text-nowrap"><input type="checkbox" ${t.completed ? 'checked' : ''} onchange="toggleTask('${t.id}', this.checked)"><button class="btn btn-sm btn-outline-warning ms-2" onclick="editTask(${t.id})">تعديل</button><button class="btn btn-sm btn-outline-danger ms-1" onclick="deleteTask(${t.id})">حذف</button></span></div>`;
         document.getElementById('dayModalContent').innerHTML = html;
         showModal('dayModal');
     } catch (e) { console.error(e); }
 };
-window.toggleTask = async function(id, status) { await db.tasks.update(id, { completed: status }); showDayDetails(currentSelectedDateStr); renderCalendar(); };
+window.toggleTask = async function(id, status) { if (!ownerOnly('تعديل المهمة')) return; await db.tasks.update(id, { completed: status }); showDayDetails(currentSelectedDateStr); renderCalendar(); };
+window.editTask = async function(id) { if (!ownerOnly('تعديل المهمة')) return; const task = await db.tasks.get(Number(id)); if (!task) return; const description = prompt('تعديل وصف المهمة:', task.description || ''); if (description === null || !description.trim()) return; await db.tasks.update(Number(id), { description: description.trim() }); await showDayDetails(currentSelectedDateStr); await renderCalendar(); await loadUpcomingEvents(); };
+window.deleteTask = async function(id) { if (!ownerOnly('حذف المهمة')) return; const task = await db.tasks.get(Number(id)); if (!task) return; const result = await Swal.fire({ title: 'حذف المهمة؟', text: task.description || '', icon: 'warning', showCancelButton: true, confirmButtonText: 'حذف', cancelButtonText: 'إلغاء', confirmButtonColor: '#b43b45' }); if (!result.isConfirmed) return; await db.tasks.delete(Number(id)); await showDayDetails(currentSelectedDateStr); await renderCalendar(); await loadUpcomingEvents(); };
 let editingEventId = null;
 window.openEditEvent = async function(id) {
+    if (!ownerOnly('تعديل الحدث')) return;
     const event = await db.events.get(Number(id));
     if (!event) return Swal.fire('تنبيه', 'الحدث غير موجود', 'warning');
     editingEventId = event.id;
@@ -898,6 +928,7 @@ window.openEditEvent = async function(id) {
     showModal('editEventModal');
 };
 window.saveEditedEvent = async function() {
+    if (!ownerOnly('تعديل الحدث')) return;
     if (editingEventId === null) return;
     const title = document.getElementById('editEventTitle').value.trim();
     const date = document.getElementById('editEventDate').value;
@@ -911,6 +942,7 @@ window.saveEditedEvent = async function() {
     await loadUpcomingEvents();
 };
 window.deleteEvent = async function(id) {
+    if (!ownerOnly('حذف الحدث')) return;
     const event = await db.events.get(Number(id));
     if (!event) return;
     const result = await Swal.fire({ title: 'حذف الحدث؟', text: event.title || '', icon: 'warning', showCancelButton: true, confirmButtonText: 'حذف', cancelButtonText: 'إلغاء', confirmButtonColor: '#b43b45' });
@@ -940,7 +972,7 @@ window.loadUpcomingEvents = async function() {
         events.sort((a, b) => a.date.localeCompare(b.date)); tasks.sort((a, b) => a.date.localeCompare(b.date));
         let html = '';
         for (let e of events) html += `<div class="p-2 mb-2 bg-dark rounded border-start border-success border-4 d-flex justify-content-between align-items-center gap-2"><span><span class="text-success small">${escapeHtml(e.date)}</span><br>${escapeHtml(e.title)}</span><span class="text-nowrap"><button class="btn btn-sm btn-outline-warning" onclick="openEditEvent(${e.id})" title="تعديل"><i class="bi bi-pencil"></i></button><button class="btn btn-sm btn-outline-danger ms-1" onclick="deleteEvent(${e.id})" title="حذف"><i class="bi bi-trash"></i></button></span></div>`;
-        for (let t of tasks) html += `<div class="p-2 mb-2 bg-dark rounded border-start border-warning border-4"><span class="text-warning small">${t.date}</span><br>${t.description}</div>`;
+        for (let t of tasks) html += `<div class="p-2 mb-2 bg-dark rounded border-start border-warning border-4 d-flex justify-content-between align-items-center gap-2"><span><span class="text-warning small">${t.date}</span><br>${escapeHtml(t.description)}</span><span class="text-nowrap"><button class="btn btn-sm btn-outline-warning" onclick="editTask(${t.id})">تعديل</button><button class="btn btn-sm btn-outline-danger ms-1" onclick="deleteTask(${t.id})">حذف</button></span></div>`;
         document.getElementById('upcomingEventsList').innerHTML = html || '<p class="text-muted">لا يوجد</p>';
     } catch (e) { }
 };
@@ -1180,8 +1212,12 @@ async function uploadToSupabase() {
                 const { error } = await supabaseClient.from('cases').update(updateData).eq('case_code', case_code);
                 if (error) throw error;
             } else if (op.operation === 'delete_case') {
-                const { error: sessionsError } = await supabaseClient.from('sessions').delete().eq('case_id', op.data.id);
-                if (sessionsError) throw sessionsError;
+                for (const table of ['sessions', 'payments', 'expenses', 'financial_transactions']) {
+                    const { error } = await supabaseClient.from(table).delete().eq('case_id', op.data.id);
+                    if (error) throw error;
+                }
+                const { error: feeError } = await supabaseClient.from('fees').delete().eq('case_id', op.data.id);
+                if (feeError) throw feeError;
                 const { error: caseError } = await supabaseClient.from('cases').delete().eq('id', op.data.id);
                 if (caseError) throw caseError;
             } else if (op.operation === 'insert_session') {
@@ -1381,7 +1417,7 @@ window.deleteReceipt = async function(id) { const receipt = await db.receipts.ge
 // ========== 16. حذف القضية وأرشفتها ==========
 window.showCaseOptions = async function() { if (!activeCaseId) return; const caseData = await db.cases.get(activeCaseId); const result = await Swal.fire({ title: 'خيارات القضية', html: `ماذا تريد أن تفعل بالقضية: <strong>${caseData.client_name}</strong>؟`, icon: 'question', showCancelButton: true, showDenyButton: true, confirmButtonColor: '#dc3545', denyButtonColor: '#ffc107', cancelButtonColor: '#6c757d', confirmButtonText: '🗑️ حذف نهائي', denyButtonText: '📦 نقل إلى الأرشيف', cancelButtonText: 'إلغاء', background: '#0f172a', color: '#fff' }); if (result.isConfirmed) await deleteCasePermanently(activeCaseId); else if (result.isDenied) await archiveCase(activeCaseId); };
 window.archiveCase = async function(id) { if (!ownerOnly('أرشفة القضية')) return; try { const caseData = await db.cases.get(id); if (ipcRenderer && ipcRenderer.archiveCaseFolder) { const folderName = `${caseData.case_code} - ${caseData.client_name}`.replace(/[<>:"\/\\|?*]/g, '_'); await ipcRenderer.archiveCaseFolder(folderName); } await db.cases.update(id, { archived: 1 }); await db.pendingOperations.add({ operation: 'update_case', data: { id: id, case_code: caseData.case_code, archived: 1 }, timestamp: Date.now() }); hideModal('caseModal'); Swal.fire({ icon: 'success', title: 'تم الأرشفة', text: 'تم نقل القضية إلى الأرشيف', background: '#0f172a', color: '#fff', timer: 1500, showConfirmButton: false }); loadRecentCases(); updatePendingBadge(); } catch (error) { console.error(error); Swal.fire({ icon: 'error', title: 'خطأ', text: 'فشلت عملية الأرشفة', background: '#0f172a', color: '#fff' }); } };
-window.deleteCasePermanently = async function(id) { if (!ownerOnly('حذف القضية')) return; try { const caseData = await db.cases.get(id); if (ipcRenderer && ipcRenderer.deleteCaseFolder) { const folderName = `${caseData.case_code} - ${caseData.client_name}`.replace(/[<>:"\/\\|?*]/g, '_'); await ipcRenderer.deleteCaseFolder(folderName); } await db.cases.delete(id); await db.sessions.where('case_id').equals(id).delete(); await db.fees.delete(id); await db.payments.where('case_id').equals(id).delete(); await db.expenses.where('case_id').equals(id).delete(); await db.pendingOperations.add({ operation: 'delete_case', data: { id: id }, timestamp: Date.now() }); hideModal('caseModal'); Swal.fire({ icon: 'success', title: 'تم الحذف', text: 'تم حذف القضية نهائياً', background: '#0f172a', color: '#fff', showConfirmButton: false, timer: 2000 }); loadRecentCases(); updatePendingBadge(); } catch (error) { console.error(error); Swal.fire({ icon: 'error', title: 'خطأ', text: 'حدث خطأ أثناء الحذف', background: '#0f172a', color: '#fff' }); } };
+window.deleteCasePermanently = async function(id) { if (!ownerOnly('حذف القضية')) return; try { const caseData = await db.cases.get(id); if (ipcRenderer && ipcRenderer.deleteCaseFolder) { const folderName = `${caseData.case_code} - ${caseData.client_name}`.replace(/[<>:"\/\\|?*]/g, '_'); await ipcRenderer.deleteCaseFolder(folderName); } await db.cases.delete(id); await db.sessions.where('case_id').equals(id).delete(); await db.fees.delete(id); await db.payments.where('case_id').equals(id).delete(); await db.expenses.where('case_id').equals(id).delete(); await db.financialTransactions.where('case_id').equals(id).delete(); await db.receipts.where('record_id').equals(id).delete(); await db.pendingOperations.add({ operation: 'delete_case', data: { id: id }, timestamp: Date.now() }); hideModal('caseModal'); Swal.fire({ icon: 'success', title: 'تم الحذف', text: 'تم حذف القضية نهائياً', background: '#0f172a', color: '#fff', showConfirmButton: false, timer: 2000 }); loadRecentCases(); updatePendingBadge(); } catch (error) { console.error(error); Swal.fire({ icon: 'error', title: 'خطأ', text: 'حدث خطأ أثناء الحذف', background: '#0f172a', color: '#fff' }); } };
 
 // ========== 17. دوال إضافية ==========
 async function loadRecentCases() {
