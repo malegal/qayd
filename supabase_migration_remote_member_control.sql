@@ -1,4 +1,4 @@
--- REVIEW ONLY: do not apply until approved.
+-- Applied to Supabase project qayd after review.
 -- Adds owner-visible member labels/device metadata and revocation cleanup.
 
 create table if not exists public.office_member_devices (
@@ -38,6 +38,7 @@ begin
   return jsonb_build_object('ok', true);
 end; $$;
 revoke execute on function public.register_office_member_device(text,text,text,text,text) from public;
+revoke execute on function public.register_office_member_device(text,text,text,text,text) from anon;
 grant execute on function public.register_office_member_device(text,text,text,text,text) to authenticated;
 
 create or replace function public.rename_office_member(p_office_id text, p_user_id uuid, p_display_name text)
@@ -50,6 +51,7 @@ begin
   return jsonb_build_object('ok', true);
 end; $$;
 revoke execute on function public.rename_office_member(text,uuid,text) from public;
+revoke execute on function public.rename_office_member(text,uuid,text) from anon;
 grant execute on function public.rename_office_member(text,uuid,text) to authenticated;
 
 create or replace function public.revoke_office_member(p_office_id text, p_user_id uuid)
@@ -62,4 +64,5 @@ begin
   return jsonb_build_object('ok', true);
 end; $$;
 revoke execute on function public.revoke_office_member(text,uuid) from public;
+revoke execute on function public.revoke_office_member(text,uuid) from anon;
 grant execute on function public.revoke_office_member(text,uuid) to authenticated;
