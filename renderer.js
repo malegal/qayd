@@ -1694,6 +1694,19 @@ async function renderProfessionalFiles() {
 }
 window.openProfessionalFilesPanel = async function() { showModal('professionalFilesModal'); await renderProfessionalFiles(); };
 
-window.showTeamManagement = function() { if (!ownerOnly('إدارة الفريق')) return; showModal('teamManagementModal'); };
+window.renderDesktopTeamMembers = async function() {
+    const container = document.getElementById('desktopTeamMembers');
+    if (!container || !currentOfficeId || !supabaseClient) return;
+    const { data: members, error } = await supabaseClient.from('office_members').select('user_id,display_name,role').eq('office_id', currentOfficeId).order('created_at', { ascending: true });
+    if (error) { container.textContent = error.message; return; }
+    const rows = await Promise.all((members || []).filter(m => m.role !== 'manager').map(async member => {
+        const result = await supabaseClient.from('office_member_devices').select('device_name,platform,app_version,last_seen_at').eq('office_id', currentOfficeId).eq('user_id', member.user_id).order('last_seen_at', { ascending: false });
+        return { member, devices: result.data || [] };
+    }));
+    container.innerHTML = rows.length ? rows.map(({ member, devices }) => `<div class="border rounded p-3 mb-2"><div class="d-flex gap-2"><input class="form-control" id="desktop-member-name-${member.user_id}" value="${escapeHtml(member.display_name || '')}" placeholder="اسم عضو المكتب"><button class="btn btn-outline-primary" onclick="renameDesktopMember('${member.user_id}')">حفظ</button></div><div class="small text-muted mt-2">الدور: ${escapeHtml(member.role)}</div>${devices.map(device => `<div class="small text-muted mt-2">الجهاز: ${escapeHtml(device.device_name || device.platform)} · ${escapeHtml(device.platform)} · التطبيق ${escapeHtml(device.app_version || 'غير معروف')} · آخر ظهور ${new Date(device.last_seen_at).toLocaleString('ar-EG')}</div>`).join('')}<button class="btn btn-sm btn-outline-danger mt-2" onclick="revokeDesktopMember('${member.user_id}')">إزالة العضو ومسح بياناته المحلية عند اتصاله</button></div>`).join('') : '<div class="text-muted">لا يوجد أعضاء حاليًا.</div>';
+};
+window.showTeamManagement = async function() { if (!ownerOnly('إدارة الفريق')) return; showModal('teamManagementModal'); await renderDesktopTeamMembers(); };
 window.createDesktopInvite = async function() { if (!ownerOnly('إدارة الفريق')) return; const contact=document.getElementById('teamInviteContact').value.trim(); const role=document.getElementById('teamInviteRole').value; if(!contact) return Swal.fire('تنبيه','أدخل البريد أو الهاتف','warning'); const {data,error}=await supabaseClient.rpc('create_office_invite',{p_office_id:currentOfficeId,p_contact:contact,p_role:role,p_expires_hours:168}); if(error) return Swal.fire('خطأ',error.message,'error'); document.getElementById('teamInviteResult').textContent=`الكود: ${data.code} — صالح 7 أيام`; };
+window.renameDesktopMember = async function(userId) { if (!ownerOnly('تسمية العضو')) return; const displayName = document.getElementById(`desktop-member-name-${userId}`)?.value.trim() || ''; const { error } = await supabaseClient.rpc('rename_office_member', { p_office_id: currentOfficeId, p_user_id: userId, p_display_name: displayName }); if (error) return Swal.fire('خطأ', error.message, 'error'); await renderDesktopTeamMembers(); };
+window.revokeDesktopMember = async function(userId) { if (!ownerOnly('إزالة العضو')) return; const { error } = await supabaseClient.rpc('revoke_office_member', { p_office_id: currentOfficeId, p_user_id: userId }); if (error) return Swal.fire('خطأ', error.message, 'error'); await renderDesktopTeamMembers(); };
 window.createDesktopRecoveryCodes = async function() { if (!ownerOnly('إنشاء رموز الاسترداد')) return; const {data,error}=await supabaseClient.rpc('create_owner_recovery_codes',{p_office_id:currentOfficeId,p_count:8}); if(error) return Swal.fire('خطأ',error.message,'error'); document.getElementById('teamRecoveryResult').textContent=data.join('\n'); };
