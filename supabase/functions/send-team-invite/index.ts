@@ -22,22 +22,19 @@ function json(data: unknown, status = 200) {
   });
 }
 
-/** ينشئ رابط دعوة، ويرسله عبر Resend عند توفر المفتاح، أو يعيده للنسخ اليدوي. */
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  const appUrl = Deno.env.get("QAYD_APP_URL") ?? "https://qayd.app";
+  const inviteBaseUrl = Deno.env.get("QAYD_INVITE_BASE_URL") ?? "qayd://join";
   const resendApiKey = Deno.env.get("RESEND_API_KEY");
   const fromEmail = Deno.env.get("INVITE_FROM_EMAIL");
-
   if (!supabaseUrl || !supabaseAnonKey) return json({ error: "server_not_configured" }, 500);
 
   const authHeader = request.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) return json({ error: "authentication_required" }, 401);
-
   const client = createClient(supabaseUrl, supabaseAnonKey, {
     global: { headers: { Authorization: authHeader } },
   });
@@ -45,12 +42,7 @@ Deno.serve(async (request) => {
   if (userError || !userData.user) return json({ error: "authentication_required" }, 401);
 
   let body: { office_id?: string; email?: string; role?: string; display_name?: string; expires_hours?: number };
-  try {
-    body = await request.json();
-  } catch {
-    return json({ error: "invalid_json" }, 400);
-  }
-
+  try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
   const email = String(body.email ?? "").trim().toLowerCase();
   if (!body.office_id || !email || !body.role) return json({ error: "office_id_email_and_role_required" }, 400);
 
@@ -64,7 +56,8 @@ Deno.serve(async (request) => {
   if (error) return json({ error: error.message }, 400);
 
   const invite = data as InviteResponse;
-  const inviteUrl = `${appUrl.replace(/\/$/, "")}/join?token=${encodeURIComponent(invite.token)}`;
+  const separator = inviteBaseUrl.includes("?") ? "&" : "?";
+  const inviteUrl = `${inviteBaseUrl}${separator}token=${encodeURIComponent(invite.token)}`;
   const result: Record<string, unknown> = {
     invite_id: invite.invite_id,
     invite_url: inviteUrl,
