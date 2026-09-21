@@ -200,6 +200,7 @@
             <button class="nav-link" id="sessions-tab" data-bs-target="#sessions" type="button" role="tab"><i class="bi bi-calendar-event fs-5"></i> الجلسات</button>
             <button class="nav-link" id="archive-tab" data-bs-target="#archiveTab" type="button" role="tab" onclick="loadArchivedCases()"><i class="bi bi-archive fs-5"></i> الأرشيف</button>
             <button class="nav-link" id="search-tab" data-bs-target="#searchTab" type="button" role="tab" onclick="loadStats()"><i class="bi bi-search fs-5"></i> بحث وتقارير</button>
+            <button class="nav-link" id="team-notes-tab" data-bs-target="#teamNotesTab" type="button" role="tab" onclick="loadDesktopTeamNotes()"><i class="bi bi-journal-text fs-5"></i> ملاحظات الفريق</button>
         </div>
         <div class="p-3 border-top mt-auto" style="border-color: var(--border-color); position: relative;">
             <span id="syncBadge">0</span>
@@ -356,6 +357,22 @@
             <div class="tab-pane fade" id="archiveTab" role="tabpanel">
                 <h3 class="gold-text mb-4">القضايا المؤرشفة</h3>
                 <div id="archivedCasesList" class="row g-3"></div>
+            </div>
+
+            <!-- تبويب ملاحظات الفريق الداخلية -->
+            <div class="tab-pane fade" id="teamNotesTab" role="tabpanel">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <div><h3 class="gold-text mb-1">ملاحظات الفريق</h3><div class="text-muted small">ملاحظات داخلية للمكتب، لا تتضمن الأتعاب أو البيانات المالية.</div></div>
+                    <span class="badge bg-primary" id="desktopNotesCount">0 ملاحظة</span>
+                </div>
+                <div class="card-glass p-4 mb-4">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-lg-8"><label for="desktopNoteBody" class="form-label">ملاحظة جديدة</label><textarea id="desktopNoteBody" class="form-control" rows="3" maxlength="4000" placeholder="اكتب ملاحظة يراها فريق المكتب..."></textarea><div class="form-text">من 1 إلى 4000 حرف.</div></div>
+                        <div class="col-lg-4"><label for="desktopNoteCase" class="form-label">ربط بالقضية (اختياري)</label><select id="desktopNoteCase" class="form-select"><option value="">ملاحظة عامة للمكتب</option></select><button class="gold-btn w-100 mt-3" onclick="createDesktopTeamNote()"><i class="bi bi-plus-circle"></i> حفظ الملاحظة</button></div>
+                    </div>
+                </div>
+                <div class="input-group mb-3"><span class="input-group-text"><i class="bi bi-search"></i></span><input id="desktopNotesSearch" class="form-control" placeholder="بحث في الملاحظات أو اسم القضية" oninput="filterDesktopTeamNotes()"></div>
+                <div id="desktopTeamNotesList"></div>
             </div>
 
             <!-- تبويب البحث والإحصائيات -->

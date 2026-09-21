@@ -94,6 +94,8 @@ let caseSaveInFlight = false;
 let sessionSaveInFlight = false;
 
 const OWNER_EMAIL = 'mahmoud.abdelhamyd@gmail.com';
+const SINGLE_OFFICE_NAME = 'مكتب جاد الرب للمحاماة والاستشارات القانونية';
+let lastDesktopAuthError = '';
 const OWNER_LICENSE_KEY = 'OWNER-PERMANENT-QAYD';
 const OWNER_LICENSE_EXPIRY = '9999-12-31';
 
@@ -370,12 +372,23 @@ window.saveOfficeSetup = async function() {
         return;
     }
 
-    const officeId = generateUUID();
+    let officeId = generateUUID();
+    let resolvedOfficeName = isOwnerEmail(email) ? SINGLE_OFFICE_NAME : officeName;
+    try {
+        await initSupabase();
+        if (supabaseClient && email) {
+            const { data: existingOffice } = await supabaseClient.from('offices').select('office_id, office_name').eq('email', email).limit(1).maybeSingle();
+            if (existingOffice?.office_id) {
+                officeId = existingOffice.office_id;
+                resolvedOfficeName = isOwnerEmail(email) ? SINGLE_OFFICE_NAME : (existingOffice.office_name || officeName);
+            }
+        }
+    } catch (e) { console.warn('تعذر اكتشاف المكتب الموجود، سيستمر الإعداد المحلي:', e); }
     await db.offices.clear();
-    await db.offices.add({ office_id: officeId, office_name: officeName, pin, email: email || null, license_key: licenseKey, license_expiry: licenseExpiry });
+    await db.offices.add({ office_id: officeId, office_name: resolvedOfficeName, pin, email: email || null, license_key: licenseKey, license_expiry: licenseExpiry });
     currentOfficeId = officeId;
-    currentOfficeName = officeName;
-    updateSidebarOfficeName(officeName);
+    currentOfficeName = resolvedOfficeName;
+    updateSidebarOfficeName(resolvedOfficeName);
     localStorage.removeItem('pendingLicenseKey');
     localStorage.removeItem('pendingLicenseExpiry');
     window.continueOfficeSetup = null;
@@ -383,14 +396,13 @@ window.saveOfficeSetup = async function() {
     if (licenseKey && supabaseClient) {
         if (licenseKey === OWNER_LICENSE_KEY) await ensureOwnerLicense(officeId);
         else await supabaseClient.from('licenses').update({ office_id: officeId }).eq('license_key', licenseKey);
+        const { error: officeError } = await supabaseClient.from('offices').upsert([{ office_id: officeId, office_name: resolvedOfficeName, email: email || null, pin }], { onConflict: 'office_id' });
+        if (officeError) console.warn('تعذر حفظ تعريف المكتب على Supabase:', officeError.message);
     }
-
-    try {
-        await initSupabase();
-        if (supabaseClient) {
-            await supabaseClient.from('offices').insert([{ office_id: officeId, office_name: officeName, email: email || null, pin }]);
-        }
-    } catch(e) { console.warn(e); }
+    if (isOwnerEmail(email)) {
+        const authenticated = await ensureDesktopSupabaseSession();
+        if (!authenticated) console.warn('لم تكتمل جلسة مالك المكتب أثناء الإعداد:', lastDesktopAuthError);
+    }
 
     hideModal('officeSetupModal');
     document.getElementById('loginPage').style.display = 'none';
@@ -453,6 +465,9 @@ window.recoverOffice = async function() {
     showTab('agendaTab');
 
     await setSupabaseOfficeId(currentOfficeId);
+    if (isOwnerEmail(email) && !(await ensureDesktopSupabaseSession())) {
+        return Swal.fire('تعذر التحقق من المالك', lastDesktopAuthError || 'تعذر تسجيل جلسة مالك المكتب.', 'error');
+    }
     await downloadFromSupabase();
     await loadRecentCases();
     await loadUpcomingSessions('week');
@@ -470,7 +485,8 @@ async function checkOfficeSetup() {
     const offices = await db.offices.toArray();
     if (offices.length > 0) {
         currentOfficeId = offices[0].office_id;
-        currentOfficeName = offices[0].office_name;
+        currentOfficeName = isOwnerEmail(offices[0].email) ? SINGLE_OFFICE_NAME : offices[0].office_name;
+        if (isOwnerEmail(offices[0].email) && offices[0].office_name !== SINGLE_OFFICE_NAME) await db.offices.update(offices[0].id, { office_name: SINGLE_OFFICE_NAME });
         updateSidebarOfficeName(currentOfficeName);
         await loadAndDisplayLicenseStatus();
         return true;
@@ -488,6 +504,17 @@ window.verifyPin = async function() {
         currentOfficeId = offices[0].office_id;
         currentOfficeName = offices[0].office_name;
         updateSidebarOfficeName(currentOfficeName);
+        // PIN المحلي يثبت مالك نسخة سطح المكتب، ثم نؤكد الهوية نفسها في Supabase.
+        currentUserRole = isOwnerEmail(offices[0].email) ? 'manager' : null;
+        document.querySelector('#finance-tab')?.classList.toggle('d-none', !canSeeFinance());
+        document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', currentUserRole !== 'manager');
+
+        if (isOwnerEmail(offices[0].email)) {
+            const authenticated = await ensureDesktopSupabaseSession();
+            if (!authenticated) {
+                return Swal.fire('تعذر التحقق من المالك', lastDesktopAuthError || 'سجّل الدخول بالبريد المرتبط بالمكتب ثم أعد المحاولة.', 'error');
+            }
+        }
 
         if (!DEV_MODE && !isOwnerEmail(offices[0].email)) {
             const licenseKey = offices[0].license_key;
@@ -1014,32 +1041,36 @@ window.printCasePDF = async function() { if (!currentCaseForPrint) return; const
 // تسجيل الدخول إلى Supabase من سطح المكتب باستخدام نفس البريد وPIN المحليين.
 // لا نرسل PIN إلى أي مكان خارج طلب Auth؛ بعد نجاح الدخول تستخدم RPC سياسات المكتب.
 async function ensureDesktopSupabaseSession() {
+    lastDesktopAuthError = '';
     if (!supabaseClient) await initSupabase();
-    if (!supabaseClient || !currentOfficeId) return false;
+    if (!supabaseClient || !currentOfficeId) { lastDesktopAuthError = 'تعذر تهيئة اتصال Supabase أو معرف المكتب.'; return false; }
     const office = await db.offices.where('office_id').equals(currentOfficeId).first();
-    if (!office?.email || !office?.pin) return false;
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    if (session?.user?.email?.toLowerCase() === String(office.email).toLowerCase()) {
-        const { data: membership } = await supabaseClient.from('office_members').select('role').eq('office_id', currentOfficeId).eq('user_id', session.user.id).maybeSingle();
-        currentUserRole = membership?.role || null;
+    if (!office?.email || !office?.pin) { lastDesktopAuthError = 'بيانات بريد/PIN مالك المكتب غير موجودة على هذا الجهاز.'; return false; }
+    const applyOwnerMembership = async (userId) => {
+        if (!userId) return false;
+        const { data: membership, error: membershipError } = await supabaseClient.from('office_members').select('role,display_name').eq('office_id', currentOfficeId).eq('user_id', userId).maybeSingle();
+        if (membershipError) { lastDesktopAuthError = membershipError.message; return false; }
+        if (!membership) {
+            const { data: bootstrapped, error: bootstrapError } = await supabaseClient.rpc('bootstrap_owner_membership', { p_office_id: currentOfficeId });
+            if (bootstrapError) { lastDesktopAuthError = bootstrapError.message; return false; }
+            currentUserRole = bootstrapped?.role || null;
+        } else currentUserRole = membership.role || null;
         document.querySelector('#finance-tab')?.classList.toggle('d-none', !canSeeFinance());
         document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', currentUserRole !== 'manager');
-        return true;
-    }
-    let { error } = await supabaseClient.auth.signInWithPassword({ email: office.email, password: office.pin });
+        return currentUserRole === 'manager';
+    };
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session?.user?.email?.toLowerCase() === String(office.email).toLowerCase()) return applyOwnerMembership(session.user.id);
+    if (session) await supabaseClient.auth.signOut();
+    let { data: loginData, error } = await supabaseClient.auth.signInWithPassword({ email: office.email, password: office.pin });
     if (error && office.email && office.pin) {
         const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({ email: office.email, password: office.pin });
-        if (!signUpError && signUpData.session) error = null;
+        if (!signUpError && signUpData.session) { loginData = signUpData; error = null; }
+        else if (signUpError) lastDesktopAuthError = signUpError.message;
+        else lastDesktopAuthError = 'حساب المالك يحتاج تأكيد البريد الإلكتروني قبل المزامنة.';
     }
-    if (error) {
-        console.warn('تعذر تسجيل دخول مزامنة سطح المكتب:', error.message);
-        return false;
-    }
-    const { data: membership } = await supabaseClient.from('office_members').select('role').eq('office_id', currentOfficeId).eq('user_id', (await supabaseClient.auth.getUser()).data.user?.id).maybeSingle();
-    currentUserRole = membership?.role || null;
-    document.querySelector('#finance-tab')?.classList.toggle('d-none', !canSeeFinance());
-    document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', currentUserRole !== 'manager');
-    return true;
+    if (error) { lastDesktopAuthError = error.message; return false; }
+    return applyOwnerMembership(loginData?.user?.id || (await supabaseClient.auth.getUser()).data.user?.id);
 }
 
 function newSyncOperationId() {
@@ -1179,7 +1210,7 @@ window.syncWithSupabase = async function() {
             db.financialTransactions.where('office_id').equals(currentOfficeId).count()
         ]);
         Swal.fire({ icon: 'success', title: 'تم', text: `تمت المزامنة — قضايا: ${syncedCases} · جلسات: ${syncedSessions} · مهام: ${syncedTasks} · حركات مالية: ${syncedLedger}`, background: '#0f172a', color: '#fff', showConfirmButton: false, timer: 3500 });
-    } catch (err) { console.error('فشلت المزامنة:', err); Swal.close(); Swal.fire({ icon: 'error', title: 'فشلت المزامنة', text: err?.message || 'حدث خطأ غير معروف أثناء رفع بيانات المكتب', background: '#0f172a', color: '#fff' }); }
+    } catch (err) { console.error('فشلت المزامنة:', err); Swal.close(); Swal.fire({ icon: 'error', title: 'فشلت المزامنة', text: err?.message || lastDesktopAuthError || 'حدث خطأ غير معروف أثناء رفع بيانات المكتب', background: '#0f172a', color: '#fff' }); }
 };
 
 let backgroundSyncInFlight = false;
@@ -1220,6 +1251,8 @@ async function uploadToSupabase() {
                 if (feeError) throw feeError;
                 const { error: caseError } = await supabaseClient.from('cases').delete().eq('id', op.data.id);
                 if (caseError) throw caseError;
+            } else if (op.operation === 'update_fee') {
+                await pushDesktopRecord('fees', op.data.case_id, 'update', op.data);
             } else if (op.operation === 'insert_session') {
                 const sessionData = { ...op.data };
                 const { error } = await supabaseClient.from('sessions').insert([sessionData]);
@@ -1381,8 +1414,8 @@ window.openFeesModal = async function(caseId) {
     await renderReceipts(caseId);
     showModal('feesModal');
 };
-window.updateTotalFee = async function() { if (!ownerOnly('تعديل الأتعاب')) return; const newTotal = parseFloat(document.getElementById('feeTotalInput').value) || 0; const fee = await db.fees.get(activeCaseId); if (fee) { fee.total = newTotal; fee.remaining = newTotal - fee.paid; await db.fees.put(fee); document.getElementById('feeRemVal').innerText = fee.remaining.toFixed(2); } };
-window.updateFeeNotes = async function() { if (!ownerOnly('تعديل الأتعاب')) return; const fee = await db.fees.get(activeCaseId); if (fee) { fee.notes = document.getElementById('feeGeneralNotes').value; await db.fees.put(fee); } };
+window.updateTotalFee = async function() { if (!ownerOnly('تعديل الأتعاب')) return; const newTotal = parseFloat(document.getElementById('feeTotalInput').value) || 0; const fee = await db.fees.get(activeCaseId); if (fee) { fee.total = newTotal; fee.remaining = newTotal - (fee.paid || 0); await db.fees.put(fee); await db.pendingOperations.add({ operation: 'update_fee', data: { case_id: activeCaseId, total: fee.total, paid: fee.paid || 0, remaining: fee.remaining, notes: fee.notes || '' }, timestamp: Date.now() }); document.getElementById('feeRemVal').innerText = fee.remaining.toFixed(2); updatePendingBadge(); } };
+window.updateFeeNotes = async function() { if (!ownerOnly('تعديل الأتعاب')) return; const fee = await db.fees.get(activeCaseId); if (fee) { fee.notes = document.getElementById('feeGeneralNotes').value; await db.fees.put(fee); await db.pendingOperations.add({ operation: 'update_fee', data: { case_id: activeCaseId, total: fee.total || 0, paid: fee.paid || 0, remaining: fee.remaining || 0, notes: fee.notes || '' }, timestamp: Date.now() }); updatePendingBadge(); } };
 window.addPayment = async function() { if (!['manager', 'accountant'].includes(currentUserRole)) { Swal.fire('غير مسموح', 'المالك أو المحاسب فقط يستطيع إضافة الدفعات', 'warning'); return; } if (!activeCaseId) return; const amount = parseFloat(document.getElementById('payAmount').value); const date = document.getElementById('payDate').value; const note = document.getElementById('payNote').value; if (!amount || amount <= 0 || !date) return Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'أدخل مبلغًا وتاريخًا صحيحين', background: '#0f172a' }); await db.payments.add({ case_id: activeCaseId, amount, date, note }); await db.financialTransactions.put({ id: generateUUID(), office_id: currentOfficeId, transaction_type: 'income', transaction_scope: 'case', case_id: activeCaseId, office_file_id: null, amount, transaction_date: date, category: 'دفعة أتعاب', description: note || '', created_at: new Date().toISOString() }); await openFeesModal(activeCaseId); };
 window.addExpense = async function() { if (!['manager', 'lawyer', 'staff', 'accountant'].includes(currentUserRole)) { Swal.fire('غير مسموح', 'لا تملك صلاحية إضافة المصروفات', 'warning'); return; } if (!activeCaseId) return; const amount = parseFloat(document.getElementById('expenseAmount').value); const date = document.getElementById('expenseDate').value; const category = document.getElementById('expenseCategory').value.trim(); if (!amount || amount <= 0 || !date) return Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'أدخل قيمة المصروف وتاريخه', background: '#0f172a' }); await db.expenses.add({ office_id: currentOfficeId, owner_id: activeCaseId, case_id: activeCaseId, amount, date, category }); await db.financialTransactions.put({ id: generateUUID(), office_id: currentOfficeId, transaction_type: 'expense', transaction_scope: 'case', case_id: activeCaseId, office_file_id: null, amount, transaction_date: date, category: category || 'مصروف', description: '', created_at: new Date().toISOString() }); await openFeesModal(activeCaseId); };
 window.deletePayment = async function(paymentId) { if (!ownerOnly('حذف دفعة')) return; if (confirm('هل أنت متأكد من حذف الدفعة؟')) { await db.payments.delete(paymentId); await openFeesModal(activeCaseId); } };
@@ -1769,3 +1802,65 @@ window.revokeDesktopInvite = async function(inviteId) { if (!ownerOnly('إلغا
 window.renameDesktopMember = async function(userId) { if (!ownerOnly('تسمية العضو')) return; const displayName = document.getElementById(`desktop-member-name-${userId}`)?.value.trim() || ''; const { error } = await supabaseClient.rpc('rename_office_member', { p_office_id: currentOfficeId, p_user_id: userId, p_display_name: displayName }); if (error) return Swal.fire('خطأ', error.message, 'error'); await renderDesktopTeamMembers(); };
 window.revokeDesktopMember = async function(userId) { if (!ownerOnly('إزالة العضو')) return; const { error } = await supabaseClient.rpc('revoke_office_member', { p_office_id: currentOfficeId, p_user_id: userId }); if (error) return Swal.fire('خطأ', error.message, 'error'); await renderDesktopTeamMembers(); };
 window.createDesktopRecoveryCodes = async function() { if (!ownerOnly('إنشاء رموز الاسترداد')) return; const {data,error}=await supabaseClient.rpc('create_owner_recovery_codes',{p_office_id:currentOfficeId,p_count:8}); if(error) return Swal.fire('خطأ',error.message,'error'); document.getElementById('teamRecoveryResult').textContent=data.join('\n'); };
+let desktopTeamNotesCache = [];
+let desktopTeamNoteMembers = new Map();
+let desktopTeamNoteCases = new Map();
+async function getDesktopAuthUserId() { return (await supabaseClient.auth.getUser()).data.user?.id || null; }
+function desktopNoteAuthorName(note) { return desktopTeamNoteMembers.get(note.author_user_id)?.display_name || desktopTeamNoteMembers.get(note.author_user_id)?.role || 'عضو المكتب'; }
+function desktopNoteCaseLabel(note) { const c = desktopTeamNoteCases.get(note.case_id); return c ? `${c.client_name || 'قضية'} · ${c.case_number || c.case_code || ''}` : (note.case_id ? 'قضية مرتبطة' : 'ملاحظة عامة'); }
+window.loadDesktopTeamNotes = async function() {
+    if (!supabaseClient || !currentOfficeId) return;
+    const list = document.getElementById('desktopTeamNotesList'); if (list) list.innerHTML = '<div class="text-muted p-4 text-center">جارٍ تحميل الملاحظات...</div>';
+    const [notesResult, membersResult, casesResult] = await Promise.all([
+        supabaseClient.from('notes').select('id,office_id,content,case_id,office_file_id,author_user_id,created_at,updated_at').eq('office_id', currentOfficeId).order('created_at', { ascending: false }).limit(500),
+        supabaseClient.from('office_members').select('user_id,display_name,role').eq('office_id', currentOfficeId).limit(100),
+        supabaseClient.from('cases').select('id,case_code,client_name,case_number').eq('office_id', currentOfficeId).eq('archived', 0).order('created_at', { ascending: false }).limit(500),
+    ]);
+    if (notesResult.error) { if (list) list.innerHTML = `<div class="alert alert-danger">${escapeHtml(notesResult.error.message)}</div>`; return; }
+    desktopTeamNotesCache = notesResult.data || [];
+    desktopTeamNoteMembers = new Map((membersResult.data || []).map(m => [m.user_id, m]));
+    desktopTeamNoteCases = new Map((casesResult.data || []).map(c => [c.id, c]));
+    const select = document.getElementById('desktopNoteCase');
+    if (select) select.innerHTML = '<option value="">ملاحظة عامة للمكتب</option>' + [...desktopTeamNoteCases.values()].map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.client_name || 'قضية')} · ${escapeHtml(c.case_number || c.case_code || c.id)}</option>`).join('');
+    filterDesktopTeamNotes();
+};
+window.filterDesktopTeamNotes = function() {
+    const query = (document.getElementById('desktopNotesSearch')?.value || '').trim().toLowerCase();
+    const rows = desktopTeamNotesCache.filter(note => !query || [note.content, desktopNoteAuthorName(note), desktopNoteCaseLabel(note)].some(v => String(v || '').toLowerCase().includes(query)));
+    const count = document.getElementById('desktopNotesCount'); if (count) count.textContent = `${rows.length} ملاحظة`;
+    const userIdPromise = getDesktopAuthUserId();
+    userIdPromise.then(userId => {
+        const list = document.getElementById('desktopTeamNotesList'); if (!list) return;
+        list.innerHTML = rows.length ? rows.map(note => {
+            const canManage = currentUserRole === 'manager' || note.author_user_id === userId;
+            const edited = note.updated_at && note.updated_at !== note.created_at;
+            return `<article class="card-glass p-3 mb-3" data-note-id="${escapeHtml(note.id)}"><div class="d-flex justify-content-between gap-3"><div><div class="fw-bold">${escapeHtml(desktopNoteCaseLabel(note))}</div><div class="small text-muted">${escapeHtml(desktopNoteAuthorName(note))} · ${new Date(note.created_at).toLocaleString('ar-EG')}${edited ? ' · معدلة' : ''}</div></div>${canManage ? `<div class="d-flex gap-2"><button class="btn btn-sm btn-outline-primary" onclick="editDesktopTeamNote('${escapeHtml(note.id)}')">تعديل</button><button class="btn btn-sm btn-outline-danger" onclick="deleteDesktopTeamNote('${escapeHtml(note.id)}')">حذف</button></div>` : ''}</div><p class="mb-0 mt-3" style="white-space:pre-wrap">${escapeHtml(note.content)}</p></article>`;
+        }).join('') : '<div class="text-muted text-center p-5">لا توجد ملاحظات مطابقة.</div>';
+    });
+};
+window.createDesktopTeamNote = async function() {
+    if (!ownerOnly('إضافة ملاحظة')) return;
+    const body = document.getElementById('desktopNoteBody')?.value.trim() || '';
+    const caseId = document.getElementById('desktopNoteCase')?.value || null;
+    if (!body || body.length > 4000) return Swal.fire('تنبيه', 'اكتب ملاحظة بين 1 و4000 حرف.', 'warning');
+    const userId = await getDesktopAuthUserId();
+    const { error } = await supabaseClient.from('notes').insert({ office_id: currentOfficeId, case_id: caseId, content: body, author_user_id: userId });
+    if (error) return Swal.fire('خطأ', error.message, 'error');
+    document.getElementById('desktopNoteBody').value = ''; document.getElementById('desktopNoteCase').value = '';
+    await loadDesktopTeamNotes();
+};
+window.editDesktopTeamNote = async function(noteId) {
+    const note = desktopTeamNotesCache.find(item => item.id === noteId); if (!note) return;
+    const result = await Swal.fire({ title: 'تعديل الملاحظة', input: 'textarea', inputValue: note.content, inputAttributes: { maxlength: 4000 }, showCancelButton: true, confirmButtonText: 'حفظ', cancelButtonText: 'إلغاء', inputValidator: value => !value?.trim() ? 'اكتب نص الملاحظة' : undefined });
+    if (!result.isConfirmed) return;
+    const { error } = await supabaseClient.from('notes').update({ content: result.value.trim() }).eq('id', noteId).eq('office_id', currentOfficeId);
+    if (error) return Swal.fire('خطأ', error.message, 'error');
+    await loadDesktopTeamNotes();
+};
+window.deleteDesktopTeamNote = async function(noteId) {
+    const result = await Swal.fire({ title: 'حذف الملاحظة؟', text: 'لا يمكن التراجع عن هذا الإجراء.', icon: 'warning', showCancelButton: true, confirmButtonText: 'حذف', cancelButtonText: 'إلغاء' });
+    if (!result.isConfirmed) return;
+    const { error } = await supabaseClient.from('notes').delete().eq('id', noteId).eq('office_id', currentOfficeId);
+    if (error) return Swal.fire('خطأ', error.message, 'error');
+    await loadDesktopTeamNotes();
+};
