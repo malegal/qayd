@@ -90,6 +90,16 @@ db.version(10).stores({
     notes: '++id, office_id, case_id, office_file_id, updated_at'
 });
 
+// النموذج العام: ملف قانوني رئيسي، مراحل قضائية، خدمات غير قضائية، وطلبات اعتماد الهاتف.
+db.version(11).stores({
+    legalFiles: 'id, office_id, file_code, file_type, status, client_name, updated_at',
+    proceedings: 'id, legal_file_id, office_id, proceeding_type, parent_proceeding_id, appeal_of_proceeding_id, status, updated_at',
+    serviceActions: 'id, legal_file_id, office_id, action_type, next_followup_at, status, updated_at',
+    approvalRequests: 'id, office_id, requested_by, entity_type, entity_id, status, created_at',
+    auditLogs: '++id, office_id, entity_type, entity_id, action, created_at',
+    syncConflicts: '++id, office_id, entity_type, entity_id, status, created_at'
+});
+
 let supabaseClient = null;
 let currentOfficeId = null;
 let currentOfficeName = null;
@@ -111,7 +121,7 @@ async function normalizeOwnerLocalOffice() {
     if (!office || !isOwnerEmail(office.email)) return false;
     const oldOfficeId = office.office_id;
     if (oldOfficeId !== OWNER_OFFICE_ID) {
-        for (const table of [db.cases, db.sessions, db.tasks, db.expenses, db.financialTransactions, db.officeFiles, db.fileEvents]) {
+        for (const table of [db.cases, db.sessions, db.tasks, db.expenses, db.financialTransactions, db.officeFiles, db.fileEvents, db.notes, db.legalFiles, db.proceedings, db.serviceActions, db.approvalRequests, db.auditLogs, db.syncConflicts]) {
             const rows = await table.toArray();
             for (const row of rows) if (row.office_id === oldOfficeId) await table.update(row.id, { office_id: OWNER_OFFICE_ID });
         }
@@ -1262,6 +1272,10 @@ async function uploadToSupabase() {
                 const { id, ...noteData } = op.data;
                 const { error } = await supabaseClient.from('notes').insert([noteData]);
                 if (error) throw error;
+            } else if (['upsert_legal_file', 'upsert_proceeding', 'upsert_service_action', 'upsert_approval_request'].includes(op.operation)) {
+                const tableMap = { upsert_legal_file: 'legal_files', upsert_proceeding: 'proceedings', upsert_service_action: 'service_actions', upsert_approval_request: 'approval_requests' };
+                const { error } = await supabaseClient.from(tableMap[op.operation]).upsert(op.data, { onConflict: 'id' });
+                if (error) throw error;
             } else if (op.operation === 'insert_office_file') {
                 // الملفات المهنية تُرسل عبر RPC آمن ولا تُفتح لها صلاحية إدخال عامة.
                 const { error } = await supabaseClient.rpc('sync_office_file', { p_file: op.data });
@@ -1378,6 +1392,12 @@ async function downloadFromSupabase() {
         const existing = await db.financialTransactions.get(record.id);
         if (existing) await db.financialTransactions.update(record.id, record);
         else await db.financialTransactions.put(record);
+    }
+
+    for (const [tableName, table] of [['legal_files', db.legalFiles], ['proceedings', db.proceedings], ['service_actions', db.serviceActions], ['approval_requests', db.approvalRequests]]) {
+        const { data, error } = await supabaseClient.from(tableName).select('*').eq('office_id', currentOfficeId).limit(5000);
+        if (error) { console.error(`خطأ في تحميل ${tableName}:`, error); continue; }
+        for (const row of data || []) await table.put(row);
     }
 
     const { data: remoteNotes, error: notesError } = await supabaseClient.from('notes').select('id, office_id, case_id, office_file_id, content, author_user_id, created_at, updated_at').eq('office_id', currentOfficeId).order('updated_at', { ascending: false }).limit(5000);
@@ -1790,6 +1810,59 @@ async function renderProfessionalFiles() {
     container.innerHTML = files.reverse().map(file => `<div class="professional-file-row"><div><strong>${file.title}</strong><div class="small text-white-50">${professionalTypeLabel(file.file_type)} · ${file.client_name}</div></div><span class="professional-code">${file.file_code}</span><span class="badge bg-secondary">${file.status}</span></div>`).join('');
 }
 window.openProfessionalFilesPanel = async function() { showModal('professionalFilesModal'); await renderProfessionalFiles(); };
+
+// ========== 19. النموذج العام للملفات القانونية ==========
+const legalFileTypeLabels = { judicial: 'قضائي', real_estate: 'تسجيل عقاري', corporate: 'شركات', power_of_attorney: 'توكيل', contract: 'عقد', legal_consultation: 'استشارة', government_service: 'خدمة حكومية', enforcement: 'تنفيذ', other: 'أخرى' };
+const proceedingTypeLabels = { first_instance: 'أول درجة', appeal: 'استئناف', cassation: 'نقض', retrial: 'إعادة نظر', opposition: 'معارضة', enforcement: 'تنفيذ', execution_objection: 'إشكال تنفيذ', other: 'أخرى' };
+function generateLegalFileCode(type) { const prefix = { judicial: 'JU', real_estate: 'RE', corporate: 'CO', power_of_attorney: 'PO', contract: 'CT', legal_consultation: 'LC', government_service: 'GS', enforcement: 'EX', other: 'OT' }[type] || 'OT'; return `${prefix}-${String(new Date().getFullYear()).slice(-2)}-${String(Date.now()).slice(-6)}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`; }
+window.openLegalFileModal = function() {
+    if (!ownerOnly('إنشاء ملف قانوني')) return;
+    ['legalFileTitle','legalFileClient','legalFilePhone','legalFileDescription','legalCourt','legalCaseNumber','legalActionType','legalAuthority','legalFollowup'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    const type = document.getElementById('legalFileType'); if (type) type.value = 'judicial';
+    if (type) type.onchange = () => { document.querySelectorAll('.judicial-field').forEach(el => { el.style.display = type.value === 'judicial' ? '' : 'none'; }); document.querySelectorAll('.service-field').forEach(el => { el.style.display = type.value === 'judicial' ? 'none' : ''; }); };
+    document.querySelectorAll('.judicial-field').forEach(el => { el.style.display = ''; });
+    document.querySelectorAll('.service-field').forEach(el => { el.style.display = 'none'; });
+    showModal('legalFileModal');
+};
+window.saveLegalFile = async function() {
+    if (!ownerOnly('إنشاء ملف قانوني')) return;
+    try {
+        const fileType = document.getElementById('legalFileType').value;
+        const title = document.getElementById('legalFileTitle').value.trim();
+        const clientName = document.getElementById('legalFileClient').value.trim();
+        if (!title || !clientName) throw new Error('أدخل عنوان الملف واسم العميل');
+        const now = new Date().toISOString();
+        const file = { id: `MAT-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, office_id: currentOfficeId, file_code: generateLegalFileCode(fileType), file_type: fileType, title, status: 'open', client_name: clientName, client_phone: document.getElementById('legalFilePhone').value.trim(), description: document.getElementById('legalFileDescription').value.trim(), opened_at: now.slice(0, 10), metadata: {}, created_at: now, updated_at: now };
+        await db.legalFiles.put(file);
+        await db.pendingOperations.add({ operation: 'upsert_legal_file', data: file, timestamp: Date.now() });
+        if (fileType === 'judicial') {
+            const proceeding = { id: `PR-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, legal_file_id: file.id, office_id: currentOfficeId, proceeding_type: document.getElementById('legalProceedingType').value, court_name: document.getElementById('legalCourt').value.trim(), case_number: document.getElementById('legalCaseNumber').value.trim(), case_year: '', status: 'open', metadata: {}, created_at: now, updated_at: now };
+            await db.proceedings.put(proceeding);
+            await db.pendingOperations.add({ operation: 'upsert_proceeding', data: proceeding, timestamp: Date.now() });
+        } else {
+            const action = { id: `ACT-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, legal_file_id: file.id, office_id: currentOfficeId, action_type: document.getElementById('legalActionType').value.trim() || 'فتح الملف ومراجعة المستندات', authority: document.getElementById('legalAuthority').value.trim(), next_followup_at: document.getElementById('legalFollowup').value || null, status: 'new', notes: '', created_at: now, updated_at: now };
+            await db.serviceActions.put(action);
+            await db.pendingOperations.add({ operation: 'upsert_service_action', data: action, timestamp: Date.now() });
+        }
+        hideModal('legalFileModal'); updatePendingBadge(); await renderLegalFiles();
+        Swal.fire({ icon: 'success', title: 'تم إنشاء الملف القانوني', html: `<strong>${file.file_code}</strong>`, timer: 1800, showConfirmButton: false, background: '#0f172a', color: '#fff' });
+    } catch (error) { Swal.fire('خطأ', error.message || 'تعذر إنشاء الملف', 'error'); }
+};
+async function renderLegalFiles() {
+    const container = document.getElementById('legalFilesList'); if (!container || !currentOfficeId) return;
+    const files = await db.legalFiles.where('office_id').equals(currentOfficeId).toArray(); files.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+    if (!files.length) { container.innerHTML = '<div class="text-muted text-center py-4">لا توجد ملفات قانونية. ابدأ بإنشاء ملف رئيسي.</div>'; return; }
+    container.innerHTML = files.map(file => `<div class="professional-file-row"><div><strong>${escapeHtml(file.title)}</strong><div class="small text-muted">${legalFileTypeLabels[file.file_type] || file.file_type} · ${escapeHtml(file.client_name)}</div></div><span class="professional-code">${escapeHtml(file.file_code)}</span><button class="btn btn-sm btn-outline-primary" onclick="openLegalFileDetails('${escapeHtml(file.id)}')">المراحل والإجراءات</button></div>`).join('');
+}
+window.openLegalFilesPanel = async function() { showModal('legalFilesModal'); await renderLegalFiles(); };
+window.openLegalFileDetails = async function(fileId) {
+    const file = await db.legalFiles.get(fileId); if (!file) return;
+    const proceedings = await db.proceedings.where('legal_file_id').equals(fileId).toArray();
+    const actions = await db.serviceActions.where('legal_file_id').equals(fileId).toArray();
+    const stages = proceedings.map(p => `<div class="border rounded p-2 mb-2"><strong>${proceedingTypeLabels[p.proceeding_type] || p.proceeding_type}</strong> · ${escapeHtml(p.court_name || 'محكمة غير محددة')} · ${escapeHtml(p.case_number || 'رقم غير محدد')}<div class="small text-muted">${escapeHtml(p.status || '')}</div></div>`).join('');
+    const service = actions.map(a => `<div class="border rounded p-2 mb-2"><strong>${escapeHtml(a.action_type)}</strong> · ${escapeHtml(a.authority || 'جهة غير محددة')}<div class="small text-muted">${escapeHtml(a.status || '')} ${a.next_followup_at ? `· متابعة ${a.next_followup_at}` : ''}</div></div>`).join('');
+    await Swal.fire({ title: file.title, html: `<div class="text-end"><p>${escapeHtml(file.client_name)} · <strong>${escapeHtml(file.file_code)}</strong></p><hr><h6>المراحل القضائية</h6>${stages || '<p class="text-muted">لا توجد مراحل إضافية.</p>'}<h6>إجراءات الخدمات</h6>${service || '<p class="text-muted">لا توجد إجراءات مسجلة.</p>'}</div>`, confirmButtonText: 'إغلاق', background: '#fff', color: '#172b45', width: 720 });
+};
 
 window.showTeamManagement = function() { if (!ownerOnly('إدارة الفريق')) return; showModal('teamManagementModal'); };
 window.createDesktopInvite = async function() { if (!ownerOnly('إدارة الفريق')) return; const contact=document.getElementById('teamInviteContact').value.trim(); const role=document.getElementById('teamInviteRole').value; if(!contact) return Swal.fire('تنبيه','أدخل البريد أو الهاتف','warning'); const {data,error}=await supabaseClient.rpc('create_office_invite',{p_office_id:currentOfficeId,p_contact:contact,p_role:role,p_expires_hours:168}); if(error) return Swal.fire('خطأ',error.message,'error'); document.getElementById('teamInviteResult').textContent=`الكود: ${data.code} — صالح 7 أيام`; };
