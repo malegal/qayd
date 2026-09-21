@@ -570,6 +570,7 @@ window.verifyPin = async function() {
         checkUpcomingNotifications();
         setInterval(checkUpcomingNotifications, 3600000);
         await loadAndDisplayLicenseStatus();
+        if (currentUserRole === 'manager') loadOwnerReviewData().then(data => updateOwnerReviewBadge(data.requests.length + data.conflicts.length)).catch(error => console.warn('تعذر تحميل عداد اعتماد الهاتف:', error?.message || error));
     } else {
         Swal.fire('خطأ', 'PIN غير صحيح', 'error');
         document.getElementById('pinInput').value = '';
@@ -1042,6 +1043,7 @@ async function ensureDesktopSupabaseSession() {
         currentUserRole = isOwnerEmail(office.email) ? 'manager' : (membership?.role || null);
         document.querySelector('#finance-tab')?.classList.toggle('d-none', !canSeeFinance());
         document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', currentUserRole !== 'manager');
+        const ownerReviewBtn = document.querySelector('#ownerReviewBtn'); if (ownerReviewBtn) ownerReviewBtn.style.display = currentUserRole === 'manager' ? 'block' : 'none';
         return true;
     }
     let { error } = await supabaseClient.auth.signInWithPassword({ email: office.email, password: office.pin });
@@ -1060,6 +1062,7 @@ async function ensureDesktopSupabaseSession() {
     }
     document.querySelector('#finance-tab')?.classList.toggle('d-none', !canSeeFinance());
     document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', currentUserRole !== 'manager');
+    const ownerReviewBtn = document.querySelector('#ownerReviewBtn'); if (ownerReviewBtn) ownerReviewBtn.style.display = currentUserRole === 'manager' ? 'block' : 'none';
     return true;
 }
 
@@ -1867,3 +1870,65 @@ window.openLegalFileDetails = async function(fileId) {
 window.showTeamManagement = function() { if (!ownerOnly('إدارة الفريق')) return; showModal('teamManagementModal'); };
 window.createDesktopInvite = async function() { if (!ownerOnly('إدارة الفريق')) return; const contact=document.getElementById('teamInviteContact').value.trim(); const role=document.getElementById('teamInviteRole').value; if(!contact) return Swal.fire('تنبيه','أدخل البريد أو الهاتف','warning'); const {data,error}=await supabaseClient.rpc('create_office_invite',{p_office_id:currentOfficeId,p_contact:contact,p_role:role,p_expires_hours:168}); if(error) return Swal.fire('خطأ',error.message,'error'); document.getElementById('teamInviteResult').textContent=`الكود: ${data.code} — صالح 7 أيام`; };
 window.createDesktopRecoveryCodes = async function() { if (!ownerOnly('إنشاء رموز الاسترداد')) return; const {data,error}=await supabaseClient.rpc('create_owner_recovery_codes',{p_office_id:currentOfficeId,p_count:8}); if(error) return Swal.fire('خطأ',error.message,'error'); document.getElementById('teamRecoveryResult').textContent=data.join('\n'); };
+
+
+// ========== 20. مركز اعتماد المالك وحل تعارضات المزامنة ==========
+const reviewTableMap = { case: 'cases', proceeding: 'proceedings', session: 'sessions', task: 'tasks', note: 'notes', fee: 'fees', payment: 'payments', expense: 'expenses', service_action: 'service_actions', legal_file: 'legal_files' };
+function reviewPayloadTable(entityType) { return reviewTableMap[entityType] || null; }
+function reviewConflictLabel(status) { return { pending: 'معلق', resolved_local: 'اعتمدت النسخة المحلية', resolved_remote: 'اعتمدت النسخة البعيدة', dismissed: 'تم تجاهله' }[status] || status; }
+async function ensureReviewOwner() { return currentUserRole === 'manager' && currentOfficeId === OWNER_OFFICE_ID && await ensureDesktopSupabaseSession(); }
+function updateOwnerReviewBadge(count) { const badge = document.getElementById('ownerReviewBadge'); if (badge) { badge.innerText = count; badge.style.display = count ? 'inline-block' : 'none'; } }
+async function loadOwnerReviewData() {
+    if (!(await ensureReviewOwner())) throw new Error('مركز الاعتماد متاح لمالك المكتب فقط');
+    const [{ data: requests, error: requestsError }, { data: conflicts, error: conflictsError }] = await Promise.all([
+        supabaseClient.from('approval_requests').select('*').eq('office_id', currentOfficeId).eq('status', 'pending').order('created_at', { ascending: false }).limit(200),
+        supabaseClient.from('sync_conflicts').select('*').eq('office_id', currentOfficeId).eq('status', 'pending').order('created_at', { ascending: false }).limit(200)
+    ]);
+    if (requestsError) throw requestsError; if (conflictsError) throw conflictsError;
+    await db.approvalRequests.bulkPut(requests || []); await db.syncConflicts.bulkPut(conflicts || []);
+    return { requests: requests || [], conflicts: conflicts || [] };
+}
+function formatReviewPayload(payload) { const entries = Object.entries(payload || {}).filter(([key]) => !['created_at','updated_at','office_id'].includes(key)).slice(0, 12); return entries.map(([key, value]) => `<div class="small"><strong>${escapeHtml(key)}:</strong> ${escapeHtml(typeof value === 'object' ? JSON.stringify(value) : String(value ?? ''))}</div>`).join(''); }
+function renderOwnerReviewData({ requests, conflicts }) {
+    const requestHost = document.getElementById('ownerApprovalRequestsList'); const conflictHost = document.getElementById('ownerSyncConflictsList');
+    document.getElementById('ownerReviewPendingCount').innerText = requests.length; document.getElementById('ownerConflictCount').innerText = conflicts.length; updateOwnerReviewBadge(requests.length + conflicts.length);
+    if (requestHost) requestHost.innerHTML = requests.length ? requests.map(r => `<div class="border rounded p-3 mb-2"><div class="d-flex justify-content-between"><strong>${escapeHtml(r.entity_type)} · ${escapeHtml(r.action)}</strong><span class="small text-muted">${new Date(r.created_at).toLocaleString('ar-EG')}</span></div><div class="small text-muted mt-1">الكيان: ${escapeHtml(r.entity_id)}${r.reason ? ` · السبب: ${escapeHtml(r.reason)}` : ''}</div><div class="bg-light rounded p-2 mt-2">${formatReviewPayload(r.payload)}</div><div class="d-flex gap-2 mt-2"><button class="btn btn-sm btn-success" onclick="reviewApprovalRequest('${escapeHtml(r.id)}','approved')">اعتماد وتطبيق</button><button class="btn btn-sm btn-outline-danger" onclick="reviewApprovalRequest('${escapeHtml(r.id)}','rejected')">رفض</button></div></div>`).join('') : '<div class="text-muted py-3">لا توجد طلبات هاتف معلقة.</div>';
+    if (conflictHost) conflictHost.innerHTML = conflicts.length ? conflicts.map(c => `<div class="border border-danger rounded p-3 mb-2"><div class="d-flex justify-content-between"><strong>${escapeHtml(c.entity_type)} · ${escapeHtml(c.entity_id)}</strong><span class="small text-muted">${new Date(c.created_at).toLocaleString('ar-EG')}</span></div><div class="row g-2 mt-1"><div class="col-md-6"><div class="small fw-bold text-primary">النسخة المحلية</div><div class="bg-light rounded p-2">${formatReviewPayload(c.local_payload)}</div></div><div class="col-md-6"><div class="small fw-bold text-danger">النسخة البعيدة</div><div class="bg-light rounded p-2">${formatReviewPayload(c.remote_payload)}</div></div></div><div class="d-flex gap-2 mt-2"><button class="btn btn-sm btn-primary" onclick="resolveSyncConflict('${escapeHtml(c.id)}','local')">اعتماد المحلية</button><button class="btn btn-sm btn-danger" onclick="resolveSyncConflict('${escapeHtml(c.id)}','remote')">اعتماد البعيدة</button><button class="btn btn-sm btn-outline-secondary" onclick="resolveSyncConflict('${escapeHtml(c.id)}','dismiss')">تجاهل</button></div></div>`).join('') : '<div class="text-muted py-3">لا توجد تعارضات معلقة.</div>';
+}
+window.refreshOwnerReviewCenter = async function() { try { const data = await loadOwnerReviewData(); renderOwnerReviewData(data); } catch (error) { Swal.fire('تعذر التحديث', error.message || 'فشل تحميل مركز الاعتماد', 'error'); } };
+window.openOwnerReviewCenter = async function() { if (!(await ensureReviewOwner())) return Swal.fire('غير مسموح', 'هذه الشاشة متاحة لمالك المكتب فقط', 'warning'); showModal('ownerReviewModal'); await refreshOwnerReviewCenter(); };
+async function applyReviewPayload(entityType, payload, localOnly = false) {
+    const tableName = reviewPayloadTable(entityType); if (!tableName || !payload) throw new Error(`نوع كيان غير مدعوم: ${entityType}`);
+    const table = db[({ legal_files: 'legalFiles', service_actions: 'serviceActions', proceedings: 'proceedings', approval_requests: 'approvalRequests' }[tableName] || tableName)];
+    if (localOnly) { if (table) await table.put(payload); return; }
+    const data = { ...payload, office_id: payload.office_id || currentOfficeId };
+    const conflict = tableName === 'fees' ? 'case_id' : 'id';
+    const { error } = await supabaseClient.from(tableName).upsert(data, { onConflict: conflict }); if (error) throw error;
+    if (table) await table.put(payload);
+}
+window.reviewApprovalRequest = async function(id, decision) {
+    if (!(await ensureReviewOwner())) return;
+    const request = await db.approvalRequests.get(id); if (!request) return Swal.fire('غير موجود', 'تعذر العثور على طلب الاعتماد', 'error');
+    const noteResult = await Swal.fire({ title: decision === 'approved' ? 'اعتماد طلب الهاتف' : 'رفض طلب الهاتف', input: 'textarea', inputLabel: 'ملاحظة المالك (اختيارية)', inputPlaceholder: 'سبب القرار أو تعليمات للفريق', showCancelButton: true, confirmButtonText: decision === 'approved' ? 'اعتماد وتطبيق' : 'رفض الطلب', cancelButtonText: 'إلغاء', confirmButtonColor: decision === 'approved' ? '#198754' : '#dc3545' });
+    if (!noteResult.isConfirmed) return;
+    try {
+        if (decision === 'approved') await applyReviewPayload(request.entity_type, request.payload);
+        const user = (await supabaseClient.auth.getUser()).data.user;
+        const update = { status: decision, reviewed_by: user?.id || null, reviewed_at: new Date().toISOString(), review_note: noteResult.value || null };
+        const { error } = await supabaseClient.from('approval_requests').update(update).eq('id', id).eq('office_id', currentOfficeId); if (error) throw error;
+        await db.approvalRequests.update(id, update); await refreshOwnerReviewCenter(); Swal.fire({ icon: 'success', title: decision === 'approved' ? 'تم اعتماد الطلب وتطبيقه' : 'تم رفض الطلب', timer: 1600, showConfirmButton: false });
+    } catch (error) { Swal.fire('لم يكتمل القرار', error.message || 'تعذر تطبيق طلب الهاتف', 'error'); }
+};
+window.resolveSyncConflict = async function(id, choice) {
+    if (!(await ensureReviewOwner())) return;
+    const conflict = await db.syncConflicts.get(id); if (!conflict) return;
+    const confirm = await Swal.fire({ title: choice === 'dismiss' ? 'تجاهل التعارض؟' : `اعتماد النسخة ${choice === 'local' ? 'المحلية' : 'البعيدة'}؟`, text: 'سيتم تسجيل القرار باسم مالك المكتب.', icon: 'warning', showCancelButton: true, confirmButtonText: 'تأكيد', cancelButtonText: 'إلغاء' }); if (!confirm.isConfirmed) return;
+    try {
+        if (choice === 'local') await applyReviewPayload(conflict.entity_type, conflict.local_payload);
+        if (choice === 'remote') await applyReviewPayload(conflict.entity_type, conflict.remote_payload, true);
+        const user = (await supabaseClient.auth.getUser()).data.user; const status = choice === 'local' ? 'resolved_local' : choice === 'remote' ? 'resolved_remote' : 'dismissed';
+        const update = { status, resolved_by: user?.id || null, resolved_at: new Date().toISOString(), resolution_note: `قرار المالك: ${choice}` };
+        const { error } = await supabaseClient.from('sync_conflicts').update(update).eq('id', id).eq('office_id', currentOfficeId); if (error) throw error;
+        await db.syncConflicts.update(id, update); await refreshOwnerReviewCenter();
+    } catch (error) { Swal.fire('تعذر حل التعارض', error.message || 'فشل حفظ القرار', 'error'); }
+};

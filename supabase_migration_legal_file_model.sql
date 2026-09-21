@@ -81,7 +81,7 @@ create table if not exists public.approval_requests (
   id uuid primary key default gen_random_uuid(),
   office_id text not null references public.offices(office_id) on delete cascade,
   requested_by uuid not null references auth.users(id),
-  entity_type text not null check (entity_type in ('case','proceeding','session','task','note','fee','payment','expense','service_action')),
+  entity_type text not null check (entity_type in ('legal_file','case','proceeding','session','task','note','fee','payment','expense','service_action')),
   entity_id text not null,
   action text not null check (action in ('create','update','delete','reschedule','archive')),
   payload jsonb not null default '{}'::jsonb,
