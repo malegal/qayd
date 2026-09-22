@@ -1928,8 +1928,9 @@ window.createDesktopRecoveryCodes = async function() { if (!ownerOnly('إنشا�
 
 
 // ========== 20. مركز اعتماد المالك وحل تعارضات المزامنة ==========
-const reviewTableMap = { case: 'cases', proceeding: 'proceedings', session: 'sessions', task: 'tasks', note: 'notes', fee: 'fees', payment: 'payments', expense: 'expenses', service_action: 'service_actions', legal_file: 'legal_files' };
+const reviewTableMap = { case: 'cases', proceeding: 'proceedings', session: 'sessions', task: 'tasks', note: 'notes', fee: 'fees', payment: 'payments', expense: 'expenses', financial_transaction: 'financial_transactions', service_action: 'service_actions', legal_file: 'legal_files' };
 function reviewPayloadTable(entityType) { return reviewTableMap[entityType] || null; }
+function reviewEntityLabel(entityType) { return { case: 'قضية', proceeding: 'مرحلة تقاضٍ', session: 'جلسة', task: 'مهمة', note: 'ملاحظة', fee: 'أتعاب', payment: 'متحصل/دفعة', expense: 'مصروف', financial_transaction: 'حركة مالية أو نفقة', service_action: 'إجراء خدمة', legal_file: 'ملف قانوني' }[entityType] || entityType; }
 function reviewConflictLabel(status) { return { pending: 'معلق', resolved_local: 'اعتمدت النسخة المحلية', resolved_remote: 'اعتمدت النسخة البعيدة', dismissed: 'تم تجاهله' }[status] || status; }
 async function ensureReviewOwner() { return currentUserRole === 'manager' && currentOfficeId === OWNER_OFFICE_ID && await ensureDesktopSupabaseSession(); }
 function updateOwnerReviewBadge(count) { const badge = document.getElementById('ownerReviewBadge'); if (badge) { badge.innerText = count; badge.style.display = count ? 'inline-block' : 'none'; } }
@@ -1947,19 +1948,24 @@ function formatReviewPayload(payload) { const entries = Object.entries(payload |
 function renderOwnerReviewData({ requests, conflicts }) {
     const requestHost = document.getElementById('ownerApprovalRequestsList'); const conflictHost = document.getElementById('ownerSyncConflictsList');
     document.getElementById('ownerReviewPendingCount').innerText = requests.length; document.getElementById('ownerConflictCount').innerText = conflicts.length; updateOwnerReviewBadge(requests.length + conflicts.length);
-    if (requestHost) requestHost.innerHTML = requests.length ? requests.map(r => `<div class="border rounded p-3 mb-2"><div class="d-flex justify-content-between"><strong>${escapeHtml(r.entity_type)} · ${escapeHtml(r.action)}</strong><span class="small text-muted">${new Date(r.created_at).toLocaleString('ar-EG')}</span></div><div class="small text-muted mt-1">الكيان: ${escapeHtml(r.entity_id)}${r.reason ? ` · السبب: ${escapeHtml(r.reason)}` : ''}</div><div class="bg-light rounded p-2 mt-2">${formatReviewPayload(r.payload)}</div><div class="d-flex gap-2 mt-2"><button class="btn btn-sm btn-success" onclick="reviewApprovalRequest('${escapeHtml(r.id)}','approved')">اعتماد وتطبيق</button><button class="btn btn-sm btn-outline-danger" onclick="reviewApprovalRequest('${escapeHtml(r.id)}','rejected')">رفض</button></div></div>`).join('') : '<div class="text-muted py-3">لا توجد طلبات هاتف معلقة.</div>';
+    if (requestHost) requestHost.innerHTML = requests.length ? requests.map(r => `<div class="border rounded p-3 mb-2"><div class="d-flex justify-content-between"><strong>${escapeHtml(reviewEntityLabel(r.entity_type))} · ${escapeHtml(r.action)}</strong><span class="small text-muted">${new Date(r.created_at).toLocaleString('ar-EG')}</span></div><div class="small text-muted mt-1">الكيان: ${escapeHtml(r.entity_id)}${r.reason ? ` · السبب: ${escapeHtml(r.reason)}` : ''}</div><div class="bg-light rounded p-2 mt-2">${formatReviewPayload(r.payload)}</div><div class="d-flex gap-2 mt-2"><button class="btn btn-sm btn-success" onclick="reviewApprovalRequest('${escapeHtml(r.id)}','approved')">اعتماد وتطبيق</button><button class="btn btn-sm btn-outline-danger" onclick="reviewApprovalRequest('${escapeHtml(r.id)}','rejected')">رفض</button></div></div>`).join('') : '<div class="text-muted py-3">لا توجد طلبات هاتف معلقة.</div>';
     if (conflictHost) conflictHost.innerHTML = conflicts.length ? conflicts.map(c => `<div class="border border-danger rounded p-3 mb-2"><div class="d-flex justify-content-between"><strong>${escapeHtml(c.entity_type)} · ${escapeHtml(c.entity_id)}</strong><span class="small text-muted">${new Date(c.created_at).toLocaleString('ar-EG')}</span></div><div class="row g-2 mt-1"><div class="col-md-6"><div class="small fw-bold text-primary">النسخة المحلية</div><div class="bg-light rounded p-2">${formatReviewPayload(c.local_payload)}</div></div><div class="col-md-6"><div class="small fw-bold text-danger">النسخة البعيدة</div><div class="bg-light rounded p-2">${formatReviewPayload(c.remote_payload)}</div></div></div><div class="d-flex gap-2 mt-2"><button class="btn btn-sm btn-primary" onclick="resolveSyncConflict('${escapeHtml(c.id)}','local')">اعتماد المحلية</button><button class="btn btn-sm btn-danger" onclick="resolveSyncConflict('${escapeHtml(c.id)}','remote')">اعتماد البعيدة</button><button class="btn btn-sm btn-outline-secondary" onclick="resolveSyncConflict('${escapeHtml(c.id)}','dismiss')">تجاهل</button></div></div>`).join('') : '<div class="text-muted py-3">لا توجد تعارضات معلقة.</div>';
 }
 window.refreshOwnerReviewCenter = async function() { try { const data = await loadOwnerReviewData(); renderOwnerReviewData(data); } catch (error) { Swal.fire('تعذر التحديث', error.message || 'فشل تحميل مركز الاعتماد', 'error'); } };
 window.openOwnerReviewCenter = async function() { if (!(await ensureReviewOwner())) return Swal.fire('غير مسموح', 'هذه الشاشة متاحة لمالك المكتب فقط', 'warning'); showModal('ownerReviewModal'); await refreshOwnerReviewCenter(); };
-async function applyReviewPayload(entityType, payload, localOnly = false) {
+async function applyReviewPayload(entityType, payload, localOnly = false, entityId = null) {
     const tableName = reviewPayloadTable(entityType); if (!tableName || !payload) throw new Error(`نوع كيان غير مدعوم: ${entityType}`);
     const table = db[({ legal_files: 'legalFiles', service_actions: 'serviceActions', proceedings: 'proceedings', approval_requests: 'approvalRequests' }[tableName] || tableName)];
     if (localOnly) { if (table) await table.put(payload); return; }
     const data = { ...payload, office_id: payload.office_id || currentOfficeId };
+    if (entityId && entityType !== 'fee' && entityType !== 'payment') data.id = data.id || entityId;
     const conflict = tableName === 'fees' ? 'case_id' : 'id';
     const { error } = await supabaseClient.from(tableName).upsert(data, { onConflict: conflict }); if (error) throw error;
     if (table) await table.put(payload);
+    if (entityType === 'payment' && payload.case_id && Number(payload.amount) > 0) {
+        const { data: fee } = await supabaseClient.from('fees').select('case_id,total,paid,remaining,notes').eq('case_id', payload.case_id).maybeSingle();
+        if (fee) await supabaseClient.from('fees').upsert({ ...fee, paid: Number(fee.paid || 0) + Number(payload.amount), remaining: Number(fee.total || 0) - Number(fee.paid || 0) - Number(payload.amount) }, { onConflict: 'case_id' });
+    }
 }
 window.reviewApprovalRequest = async function(id, decision) {
     if (!(await ensureReviewOwner())) return;
@@ -1967,7 +1973,18 @@ window.reviewApprovalRequest = async function(id, decision) {
     const noteResult = await Swal.fire({ title: decision === 'approved' ? 'اعتماد طلب الهاتف' : 'رفض طلب الهاتف', input: 'textarea', inputLabel: 'ملاحظة المالك (اختيارية)', inputPlaceholder: 'سبب القرار أو تعليمات للفريق', showCancelButton: true, confirmButtonText: decision === 'approved' ? 'اعتماد وتطبيق' : 'رفض الطلب', cancelButtonText: 'إلغاء', confirmButtonColor: decision === 'approved' ? '#198754' : '#dc3545' });
     if (!noteResult.isConfirmed) return;
     try {
-        if (decision === 'approved') await applyReviewPayload(request.entity_type, request.payload);
+        if (decision === 'approved') {
+            const versionedTypes = new Set(['case','proceeding','session','task','note','expense','financial_transaction','service_action','legal_file']);
+            if (request.base_updated_at && versionedTypes.has(request.entity_type)) {
+                const tableName = reviewPayloadTable(request.entity_type);
+                const { data: current } = await supabaseClient.from(tableName).select('*').eq('id', request.entity_id).eq('office_id', currentOfficeId).maybeSingle();
+                if (current?.updated_at && new Date(current.updated_at) > new Date(request.base_updated_at)) {
+                    await supabaseClient.from('sync_conflicts').insert({ office_id: currentOfficeId, entity_type: request.entity_type, entity_id: request.entity_id, local_payload: request.payload, remote_payload: current, base_updated_at: request.base_updated_at, status: 'pending' });
+                    throw new Error('تم إيقاف الاعتماد وفتح تعارض للمراجعة لأن السجل تغيّر بعد آخر قراءة من الهاتف');
+                }
+            }
+            await applyReviewPayload(request.entity_type, request.payload, false, request.entity_id);
+        }
         const user = (await supabaseClient.auth.getUser()).data.user;
         const update = { status: decision, reviewed_by: user?.id || null, reviewed_at: new Date().toISOString(), review_note: noteResult.value || null };
         const { error } = await supabaseClient.from('approval_requests').update(update).eq('id', id).eq('office_id', currentOfficeId); if (error) throw error;
@@ -1979,8 +1996,8 @@ window.resolveSyncConflict = async function(id, choice) {
     const conflict = await db.syncConflicts.get(id); if (!conflict) return;
     const confirm = await Swal.fire({ title: choice === 'dismiss' ? 'تجاهل التعارض؟' : `اعتماد النسخة ${choice === 'local' ? 'المحلية' : 'البعيدة'}؟`, text: 'سيتم تسجيل القرار باسم مالك المكتب.', icon: 'warning', showCancelButton: true, confirmButtonText: 'تأكيد', cancelButtonText: 'إلغاء' }); if (!confirm.isConfirmed) return;
     try {
-        if (choice === 'local') await applyReviewPayload(conflict.entity_type, conflict.local_payload);
-        if (choice === 'remote') await applyReviewPayload(conflict.entity_type, conflict.remote_payload, true);
+        if (choice === 'local') await applyReviewPayload(conflict.entity_type, conflict.local_payload, false, conflict.entity_id);
+        if (choice === 'remote') await applyReviewPayload(conflict.entity_type, conflict.remote_payload, true, conflict.entity_id);
         const user = (await supabaseClient.auth.getUser()).data.user; const status = choice === 'local' ? 'resolved_local' : choice === 'remote' ? 'resolved_remote' : 'dismissed';
         const update = { status, resolved_by: user?.id || null, resolved_at: new Date().toISOString(), resolution_note: `قرار المالك: ${choice}` };
         const { error } = await supabaseClient.from('sync_conflicts').update(update).eq('id', id).eq('office_id', currentOfficeId); if (error) throw error;
