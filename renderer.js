@@ -100,6 +100,12 @@ db.version(11).stores({
     syncConflicts: '++id, office_id, entity_type, entity_id, status, created_at'
 });
 
+// سير العمل الجديد: أكثر من عميل/خصم وسجل تغييرات الجلسات.
+db.version(12).stores({
+    caseParties: 'id, office_id, case_id, legal_file_id, party_type, name, phone, updated_at',
+    sessionChangeLog: '++id, office_id, remote_id, session_id, changed_at, action'
+});
+
 let supabaseClient = null;
 let currentOfficeId = null;
 let currentOfficeName = null;
@@ -566,6 +572,7 @@ window.verifyPin = async function() {
         await loadUpcomingSessions('week');
         await renderCalendar();
         await loadStats();
+        await loadDashboardSummary();
         updatePendingBadge();
         checkUpcomingNotifications();
         setInterval(checkUpcomingNotifications, 3600000);
@@ -637,7 +644,7 @@ function filterCasesList() {
     }).join('') : '<div class="text-center text-white-50 py-4">لا توجد ملفات مطابقة للبحث أو الفلاتر.</div>';
 }
 function escapeHtml(str) { if (!str) return ''; return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m])); }
-window.editProfessionalFile = async function(id) { const file = await db.officeFiles.get(id); if (!file) return; const f = file.metadata?.followup || {}; document.getElementById('editingProfessionalFileId').value = id; document.getElementById('professionalFileType').value = file.file_type; document.getElementById('professionalFileTitle').value = file.title || ''; document.getElementById('professionalClientName').value = file.client_name || ''; document.getElementById('professionalClientRole').value = file.client_role || ''; document.getElementById('professionalClientPhone').value = file.client_phone || ''; document.getElementById('professionalClientNationalId').value = file.client_national_id || ''; document.getElementById('professionalClientEmail').value = file.client_email || ''; document.getElementById('professionalClientAddress').value = file.client_address || ''; document.getElementById('professionalOpponentName').value = file.opponent_name || ''; document.getElementById('professionalOpponentRole').value = file.opponent_role || ''; document.getElementById('professionalOpponentPhone').value = file.opponent_phone || ''; document.getElementById('professionalOpponentNationalId').value = file.opponent_national_id || ''; document.getElementById('professionalOpponentEmail').value = file.opponent_email || ''; document.getElementById('professionalOpponentAddress').value = file.opponent_address || ''; document.getElementById('professionalFileDescription').value = file.description || ''; document.getElementById('professionalLastActionDate').value = f.last_action_date || ''; document.getElementById('professionalLastAction').value = f.last_action || ''; document.getElementById('professionalNextActionDate').value = f.next_action_date || ''; document.getElementById('professionalNextAction').value = f.next_action || ''; document.getElementById('professionalFileSaveButton').textContent = 'حفظ التعديلات'; showModal('professionalFileModal'); };
+window.editProfessionalFile = async function(id) { const file = await db.officeFiles.get(id); if (!file) return; const f = file.metadata?.followup || {}; document.getElementById('editingProfessionalFileId').value = id; document.getElementById('professionalFileType').value = file.file_type; document.getElementById('professionalFileTitle').value = file.title || ''; document.getElementById('professionalAuthorityFileNumber').value = file.authority_file_number || ''; document.getElementById('professionalAuthorityFileYear').value = file.authority_file_year || ''; document.getElementById('professionalAuthorityName').value = file.authority_name || ''; document.getElementById('professionalClientName').value = file.client_name || ''; document.getElementById('professionalClientRole').value = file.client_role || ''; document.getElementById('professionalClientPhone').value = file.client_phone || ''; document.getElementById('professionalClientNationalId').value = file.client_national_id || ''; document.getElementById('professionalClientEmail').value = file.client_email || ''; document.getElementById('professionalClientAddress').value = file.client_address || ''; document.getElementById('professionalOpponentName').value = file.opponent_name || ''; document.getElementById('professionalOpponentRole').value = file.opponent_role || ''; document.getElementById('professionalOpponentPhone').value = file.opponent_phone || ''; document.getElementById('professionalOpponentNationalId').value = file.opponent_national_id || ''; document.getElementById('professionalOpponentEmail').value = file.opponent_email || ''; document.getElementById('professionalOpponentAddress').value = file.opponent_address || ''; document.getElementById('professionalFileDescription').value = file.description || ''; document.getElementById('professionalLastActionDate').value = f.last_action_date || ''; document.getElementById('professionalLastAction').value = f.last_action || ''; document.getElementById('professionalNextActionDate').value = f.next_action_date || ''; document.getElementById('professionalNextAction').value = f.next_action || ''; document.getElementById('professionalFileSaveButton').textContent = 'حفظ التعديلات'; showModal('professionalFileModal'); };
 window.addProfessionalDocument = async function(id) { const file = await db.officeFiles.get(id); if (!file || !ipcRenderer?.selectProfessionalDocument) return; const sources = await ipcRenderer.selectProfessionalDocument(); if (!sources || !sources.length) return; const selected = await Swal.fire({ title: 'طريقة إضافة مستندات الملف', input: 'radio', inputOptions: { copy: 'نسخ المستندات مع إبقاء الأصل', move: 'نقل المستندات وحذف الأصل من مكانه' }, inputValue: 'copy', showCancelButton: true, confirmButtonText: 'متابعة', cancelButtonText: 'إلغاء', background: '#0f172a', color: '#fff' }); if (!selected.isConfirmed) return; const result = await ipcRenderer.copyProfessionalDocument(sources, file.file_code, file.client_name, file.file_type, selected.value || 'copy'); if (!result?.success) return Swal.fire('خطأ', result?.error || 'تعذر إضافة المستندات', 'error'); Swal.fire({ icon: 'success', title: selected.value === 'move' ? 'تم نقل المستندات' : 'تم نسخ المستندات', text: `عدد المستندات: ${result.count || 0}`, timer: 1500, showConfirmButton: false }); };
 window.archiveProfessionalFile = async function(id) { const file=await db.officeFiles.get(id); if (!file) return; const result=await Swal.fire({title:'أرشفة الملف؟',text:file.title,icon:'warning',showCancelButton:true,confirmButtonText:'أرشفة',cancelButtonText:'إلغاء'}); if (!result.isConfirmed) return; await db.officeFiles.update(id,{archived:true,updated_at:new Date().toISOString()}); await db.pendingOperations.add({operation:'update_office_file',data:{id,archived:true},timestamp:Date.now()}); await loadCasesList(); document.getElementById('caseDetailContent').innerHTML='تمت أرشفة الملف'; };
 window.deleteProfessionalFile = async function(id) { const file=await db.officeFiles.get(id); if (!file) return; const result=await Swal.fire({title:'حذف الملف نهائيًا؟',text:'سيتم حذف سجل الملف وإجراءاته من الجهاز.',icon:'warning',showCancelButton:true,confirmButtonText:'حذف نهائي',cancelButtonText:'إلغاء',confirmButtonColor:'#b43b45'}); if (!result.isConfirmed) return; await db.officeFiles.delete(id); await db.fileEvents.where('file_id').equals(id).delete(); await db.fees.delete(id); await db.payments.where('case_id').equals(id).delete(); await db.expenses.where('case_id').equals(id).delete(); await db.pendingOperations.add({operation:'delete_office_file',data:{id},timestamp:Date.now()}); await loadCasesList(); document.getElementById('caseDetailContent').innerHTML='تم حذف الملف'; };
@@ -703,7 +710,22 @@ function assertValidCaseCode(caseCode) {
     return caseCode.trim();
 }
 
-window.openAddCaseModal = () => showModal('addCaseModal');
+let casePartyRowCounter = 0;
+window.addCasePartyRow = function(type) {
+    const host = document.getElementById(type === 'client' ? 'additionalClients' : 'additionalOpponents');
+    if (!host) return;
+    const key = `${type}_${++casePartyRowCounter}`;
+    host.insertAdjacentHTML('beforeend', `<div class="col-12 border rounded p-2 mt-2" data-party-row="${key}"><div class="row g-2"><div class="col-md-4"><input class="form-control party-name" placeholder="اسم ${type === 'client' ? 'العميل' : 'الخصم'}"></div><div class="col-md-3"><input class="form-control party-role" placeholder="الصفة"></div><div class="col-md-3"><input class="form-control party-phone" placeholder="الهاتف"></div><div class="col-md-2"><button type="button" class="btn btn-outline-danger w-100" onclick="this.closest('[data-party-row]').remove()">حذف</button></div><div class="col-md-3"><input class="form-control party-power-number" placeholder="رقم التوكيل"></div><div class="col-md-2"><input class="form-control party-power-year" placeholder="سنة التوكيل"></div><div class="col-md-4"><input class="form-control party-notary" placeholder="مكتب التوثيق"></div><div class="col-md-3"><input class="form-control party-national-id" placeholder="الرقم القومي"></div></div></div>`);
+};
+function collectAdditionalParties(caseId) {
+    const rows = [];
+    for (const type of ['client', 'opponent']) document.querySelectorAll(`#${type === 'client' ? 'additionalClients' : 'additionalOpponents'} [data-party-row]`).forEach(row => {
+        const name = row.querySelector('.party-name')?.value.trim(); if (!name) return;
+        rows.push({ id: generateUUID(), office_id: currentOfficeId, case_id: caseId, party_type: type, name, role: row.querySelector('.party-role')?.value.trim() || '', phone: row.querySelector('.party-phone')?.value.trim() || '', national_id: row.querySelector('.party-national-id')?.value.trim() || '', power_of_attorney_number: row.querySelector('.party-power-number')?.value.trim() || '', power_of_attorney_year: row.querySelector('.party-power-year')?.value.trim() || '', notary_office: row.querySelector('.party-notary')?.value.trim() || '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    });
+    return rows;
+}
+window.openAddCaseModal = () => { casePartyRowCounter = 0; document.getElementById('additionalClients').innerHTML = ''; document.getElementById('additionalOpponents').innerHTML = ''; showModal('addCaseModal'); };
 window.saveNewCase = async function() {
     const caseData = {
         id: 'C_' + Date.now(),
@@ -725,7 +747,12 @@ window.saveNewCase = async function() {
                 court_name: document.getElementById('court_name').value,
                 circuit: document.getElementById('circuit').value,
                 case_type: document.getElementById('case_type').value,
-                    case_subject: document.getElementById('case_subject').value,
+                        case_subject: document.getElementById('case_subject').value,
+                        category: document.getElementById('case_type').value,
+                        proceeding_type: document.getElementById('case_stage')?.value || 'first_instance',
+                        importance: document.getElementById('case_importance')?.value || 'normal',
+                        alert_notes: document.getElementById('case_alert_notes')?.value || '',
+                        city: document.getElementById('case_city')?.value || '',
                         // يجب توليد الكود قبل إنشاء الكائن وقبل أي كتابة في IndexedDB.
                         case_code: await generateCaseCode(),
                             archived: 0
@@ -734,6 +761,12 @@ window.saveNewCase = async function() {
         // التحقق النهائي قبل الحفظ المحلي؛ لا نسمح بإنشاء قضية ناقصة الكود.
     caseData.case_code = assertValidCaseCode(caseData.case_code);
     await db.cases.add(caseData);
+    const primaryParties = [
+        { id: generateUUID(), office_id: currentOfficeId, case_id: caseData.id, party_type: 'client', name: caseData.client_name, role: caseData.client_role, phone: caseData.client_phone, national_id: caseData.client_national_id, email: caseData.client_email, address: caseData.client_address, power_of_attorney_number: document.getElementById('client_power_number')?.value || '', power_of_attorney_year: document.getElementById('client_power_year')?.value || '', notary_office: document.getElementById('client_notary_office')?.value || '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+        ...(caseData.opponent_name ? [{ id: generateUUID(), office_id: currentOfficeId, case_id: caseData.id, party_type: 'opponent', name: caseData.opponent_name, role: caseData.opponent_role, phone: caseData.opponent_phone, national_id: caseData.opponent_national_id, email: caseData.opponent_email, address: caseData.opponent_address, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }] : [])
+    ];
+    const partyRows = [...primaryParties, ...collectAdditionalParties(caseData.id)];
+    if (partyRows.length) { await db.caseParties.bulkAdd(partyRows); for (const party of partyRows) await db.pendingOperations.add({ operation: 'upsert_case_party', data: party, timestamp: Date.now() }); }
     if (supabaseClient && currentOfficeId) {
         try {
             const { data: inserted, error } = await supabaseClient.from('cases').insert([caseData]).select('case_code');
@@ -826,6 +859,8 @@ window.selectCaseForSession = async function(id) {
             document.getElementById('s_case_number').value = c.case_number;
             document.getElementById('s_case_year').value = c.case_year;
             document.getElementById('s_court').value = c.court_name;
+            document.getElementById('s_circuit').value = c.circuit || '';
+            document.getElementById('s_city').value = c.city || '';
             document.getElementById('s_client').value = c.client_name;
             document.getElementById('s_client_role').value = c.client_role;
             document.getElementById('s_opponent').value = c.opponent_name || 'لا يوجد';
@@ -835,11 +870,12 @@ window.selectCaseForSession = async function(id) {
 window.saveSession = async function() {
     if (!ownerOnly('إضافة جلسة')) return;
     if (!activeCaseId || !document.getElementById('s_date').value) { Swal.fire('تنبيه', 'اختر قضية وأدخل التاريخ', 'warning'); return; }
-    const sessionData = { id: 'S_' + Date.now(), office_id: currentOfficeId, case_id: activeCaseId, session_date: document.getElementById('s_date').value, case_status: document.getElementById('s_case_status').value, decision: document.getElementById('s_decision').value };
+    const sessionData = { id: 'S_' + Date.now(), office_id: currentOfficeId, case_id: activeCaseId, session_date: document.getElementById('s_date').value, case_status: document.getElementById('s_case_status').value, decision: document.getElementById('s_decision').value, court_name: document.getElementById('s_court').value, circuit: document.getElementById('s_circuit').value, city: document.getElementById('s_city').value, required_action: document.getElementById('s_required_action').value, responsible_name: document.getElementById('s_responsible').value, followup_date: document.getElementById('s_followup').value || null };
     await db.sessions.add(sessionData);
+    await db.sessionChangeLog.add({ office_id: currentOfficeId, session_id: sessionData.id, action: 'created', old_data: {}, new_data: sessionData, changed_at: new Date().toISOString() });
     await db.pendingOperations.add({ operation: 'insert_session', data: sessionData, timestamp: Date.now() });
     Swal.fire({ icon: 'success', title: 'تم الحفظ محلياً', background: '#0f172a', showConfirmButton: false, timer: 1500 });
-    document.getElementById('s_decision').value = '';
+    ['s_decision','s_required_action','s_responsible','s_followup'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     loadUpcomingSessions('week'); renderCalendar(); updatePendingBadge();
 };
 window.loadUpcomingSessions = async function(range, btn) {
@@ -866,13 +902,21 @@ window.openEditSession = async function(id) {
     document.getElementById('edit_s_date').value = s.session_date.slice(0, 16);
     document.getElementById('edit_s_status').value = s.case_status;
     document.getElementById('edit_s_decision').value = s.decision || '';
+    document.getElementById('edit_s_court').value = s.court_name || '';
+    document.getElementById('edit_s_circuit').value = s.circuit || '';
+    document.getElementById('edit_s_city').value = s.city || '';
+    document.getElementById('edit_s_required_action').value = s.required_action || '';
+    document.getElementById('edit_s_responsible').value = s.responsible_name || '';
+    document.getElementById('edit_s_followup').value = s.followup_date || '';
     hideModal('caseModal'); showModal('editSessionModal');
 };
 window.cancelEditSession = function() { hideModal('editSessionModal'); openCaseDetails(activeCaseId); };
 window.saveEditedSession = async function() {
     if (!ownerOnly('تعديل الجلسة')) return;
-    const updated = { session_date: document.getElementById('edit_s_date').value, case_status: document.getElementById('edit_s_status').value, decision: document.getElementById('edit_s_decision').value };
+    const previous = await db.sessions.get(activeSessionId);
+    const updated = { session_date: document.getElementById('edit_s_date').value, case_status: document.getElementById('edit_s_status').value, decision: document.getElementById('edit_s_decision').value, court_name: document.getElementById('edit_s_court').value, circuit: document.getElementById('edit_s_circuit').value, city: document.getElementById('edit_s_city').value, required_action: document.getElementById('edit_s_required_action').value, responsible_name: document.getElementById('edit_s_responsible').value, followup_date: document.getElementById('edit_s_followup').value || null };
     await db.sessions.update(activeSessionId, updated);
+    await db.sessionChangeLog.add({ office_id: currentOfficeId, session_id: activeSessionId, action: 'updated', old_data: previous || {}, new_data: { ...previous, ...updated }, changed_at: new Date().toISOString() });
     await db.pendingOperations.add({ operation: 'update_session', data: { id: activeSessionId, ...updated }, timestamp: Date.now() });
     hideModal('editSessionModal');
     openCaseDetails(activeCaseId);
@@ -1092,6 +1136,10 @@ async function uploadAllLocalOfficeData() {
     }
     const cases = await db.cases.where('office_id').equals(currentOfficeId).toArray();
     for (const record of cases) await pushDesktopRecord('cases', record.id, 'update', record);
+    const parties = await db.caseParties.where('office_id').equals(currentOfficeId).toArray();
+    for (const party of parties) { const { error } = await supabaseClient.from('case_parties').upsert(party, { onConflict: 'id' }); if (error) throw error; }
+    const sessionLogs = await db.sessionChangeLog.where('office_id').equals(currentOfficeId).toArray();
+    for (const log of sessionLogs) { const remoteId = log.remote_id || generateUUID(); const { id, ...logData } = log; const { error } = await supabaseClient.from('session_change_log').upsert({ ...logData, id: remoteId }, { onConflict: 'id' }); if (error) throw error; if (!log.remote_id) await db.sessionChangeLog.update(log.id, { remote_id: remoteId }); }
 
     // لا نرفع العلاقات التابعة قبل التأكد من وجود القضية على الخادم؛
     // هذا يمنع توقف المزامنة بسبب سجلات أتعاب/جلسات قديمة يتيمة محليًا.
@@ -1185,6 +1233,7 @@ window.syncWithSupabase = async function() {
         await downloadFromSupabase();
         updatePendingBadge();
         loadStats();
+        loadDashboardSummary();
         loadCasesList();
         loadUpcomingSessions('week');
         renderCalendar();
@@ -1275,8 +1324,8 @@ async function uploadToSupabase() {
                 const { id, ...noteData } = op.data;
                 const { error } = await supabaseClient.from('notes').insert([noteData]);
                 if (error) throw error;
-            } else if (['upsert_legal_file', 'upsert_proceeding', 'upsert_service_action', 'upsert_approval_request'].includes(op.operation)) {
-                const tableMap = { upsert_legal_file: 'legal_files', upsert_proceeding: 'proceedings', upsert_service_action: 'service_actions', upsert_approval_request: 'approval_requests' };
+            } else if (['upsert_legal_file', 'upsert_proceeding', 'upsert_service_action', 'upsert_approval_request', 'upsert_case_party'].includes(op.operation)) {
+                const tableMap = { upsert_legal_file: 'legal_files', upsert_proceeding: 'proceedings', upsert_service_action: 'service_actions', upsert_approval_request: 'approval_requests', upsert_case_party: 'case_parties' };
                 const { error } = await supabaseClient.from(tableMap[op.operation]).upsert(op.data, { onConflict: 'id' });
                 if (error) throw error;
             } else if (op.operation === 'insert_office_file') {
@@ -1348,6 +1397,12 @@ async function downloadFromSupabase() {
             else await db.sessions.add(s);
         }
     }
+    const { data: remoteParties, error: partiesError } = await supabaseClient.from('case_parties').select('*').eq('office_id', currentOfficeId).limit(5000);
+    if (partiesError) console.error('خطأ في تحميل العملاء والخصوم:', partiesError);
+    for (const party of remoteParties || []) await db.caseParties.put(party);
+    const { data: remoteSessionLogs, error: sessionLogsError } = await supabaseClient.from('session_change_log').select('*').eq('office_id', currentOfficeId).limit(5000);
+    if (sessionLogsError) console.error('خطأ في تحميل سجل تغييرات الجلسات:', sessionLogsError);
+    for (const log of remoteSessionLogs || []) { const existing = await db.sessionChangeLog.where('remote_id').equals(log.id).first(); const local = { ...log, remote_id: log.id, id: existing?.id }; if (existing) await db.sessionChangeLog.update(existing.id, local); else { delete local.id; await db.sessionChangeLog.add(local); } }
 
     // الجداول التالية تُنزّل أيضًا حتى تظهر حركات الهاتف داخل سطح المكتب.
     const { data: remoteTasks, error: tasksError } = await supabaseClient.from('tasks').select('*').eq('office_id', currentOfficeId).limit(5000);
@@ -1526,7 +1581,7 @@ window.openClientDetails = async function() {
 // فتح نموذج تعديل القضية وتعبئة بيانات العميل والخصم الموجودة محليًا.
 window.openEditCaseModalFromPanel = async function() {
     const c = await db.cases.get(activeCaseId); if (!c) return;
-    const values = { edit_c_name: c.client_name, edit_c_phone: c.client_phone, edit_c_national_id: c.client_national_id, edit_c_email: c.client_email, edit_c_address: c.client_address, edit_c_opponent: c.opponent_name, edit_c_opponent_role: c.opponent_role, edit_c_opponent_national_id: c.opponent_national_id, edit_c_opponent_email: c.opponent_email, edit_c_opponent_phone: c.opponent_phone, edit_c_opponent_address: c.opponent_address, edit_c_num: c.case_number, edit_c_year: c.case_year, edit_c_court: c.court_name, edit_c_circuit: c.circuit, edit_case_type: c.case_type, edit_c_subject: c.case_subject };
+    const values = { edit_c_name: c.client_name, edit_c_phone: c.client_phone, edit_c_national_id: c.client_national_id, edit_c_email: c.client_email, edit_c_address: c.client_address, edit_c_opponent: c.opponent_name, edit_c_opponent_role: c.opponent_role, edit_c_opponent_national_id: c.opponent_national_id, edit_c_opponent_email: c.opponent_email, edit_c_opponent_phone: c.opponent_phone, edit_c_opponent_address: c.opponent_address, edit_c_num: c.case_number, edit_c_year: c.case_year, edit_c_court: c.court_name, edit_c_circuit: c.circuit, edit_case_type: c.case_type, edit_c_subject: c.case_subject, edit_case_stage: c.proceeding_type, edit_case_importance: c.importance, edit_c_city: c.city, edit_c_alert_notes: c.alert_notes };
     Object.entries(values).forEach(([id, value]) => { const el = document.getElementById(id); if (el) el.value = value || ''; });
     showModal('editCaseModal');
 };
@@ -1656,7 +1711,7 @@ window.addEventListener('keydown', (event) => {
     if (event.key.toLowerCase() === 's') { event.preventDefault(); syncWithSupabase(); }
 });
 
-window.saveEditedCase = async function() { if (!ownerOnly('تعديل القضية')) return; const updated = { client_name: document.getElementById('edit_c_name').value, client_phone: document.getElementById('edit_c_phone').value, client_national_id: document.getElementById('edit_c_national_id')?.value || '', client_email: document.getElementById('edit_c_email')?.value || '', client_address: document.getElementById('edit_c_address')?.value || '', opponent_name: document.getElementById('edit_c_opponent').value, opponent_role: document.getElementById('edit_c_opponent_role')?.value || '', opponent_national_id: document.getElementById('edit_c_opponent_national_id')?.value || '', opponent_email: document.getElementById('edit_c_opponent_email')?.value || '', opponent_phone: document.getElementById('edit_c_opponent_phone')?.value || '', opponent_address: document.getElementById('edit_c_opponent_address')?.value || '', case_number: document.getElementById('edit_c_num').value, case_year: document.getElementById('edit_c_year').value, court_name: document.getElementById('edit_c_court').value, circuit: document.getElementById('edit_c_circuit').value, case_type: document.getElementById('edit_case_type').value, case_subject: document.getElementById('edit_c_subject').value }; const currentCase = await db.cases.get(activeCaseId); if (!currentCase) throw new Error('القضية غير موجودة'); const caseCode = assertValidCaseCode(currentCase.case_code); await db.cases.update(activeCaseId, updated); await db.pendingOperations.add({ operation: 'update_case', data: { id: activeCaseId, case_code: caseCode, ...updated }, timestamp: Date.now() }); hideModal('editCaseModal'); openCaseDetails(activeCaseId); Swal.fire({ icon: 'success', title: 'تم التعديل محلياً', timer: 1000, showConfirmButton: false, background: '#0f172a' }); updatePendingBadge(); };
+window.saveEditedCase = async function() { if (!ownerOnly('تعديل القضية')) return; const updated = { client_name: document.getElementById('edit_c_name').value, client_phone: document.getElementById('edit_c_phone').value, client_national_id: document.getElementById('edit_c_national_id')?.value || '', client_email: document.getElementById('edit_c_email')?.value || '', client_address: document.getElementById('edit_c_address')?.value || '', opponent_name: document.getElementById('edit_c_opponent').value, opponent_role: document.getElementById('edit_c_opponent_role')?.value || '', opponent_national_id: document.getElementById('edit_c_opponent_national_id')?.value || '', opponent_email: document.getElementById('edit_c_opponent_email')?.value || '', opponent_phone: document.getElementById('edit_c_opponent_phone')?.value || '', opponent_address: document.getElementById('edit_c_opponent_address')?.value || '', case_number: document.getElementById('edit_c_num').value, case_year: document.getElementById('edit_c_year').value, court_name: document.getElementById('edit_c_court').value, circuit: document.getElementById('edit_c_circuit').value, case_type: document.getElementById('edit_case_type').value, case_subject: document.getElementById('edit_c_subject').value, proceeding_type: document.getElementById('edit_case_stage')?.value || 'first_instance', importance: document.getElementById('edit_case_importance')?.value || 'normal', city: document.getElementById('edit_c_city')?.value || '', alert_notes: document.getElementById('edit_c_alert_notes')?.value || '' }; const currentCase = await db.cases.get(activeCaseId); if (!currentCase) throw new Error('القضية غير موجودة'); const caseCode = assertValidCaseCode(currentCase.case_code); await db.cases.update(activeCaseId, updated); await db.pendingOperations.add({ operation: 'update_case', data: { id: activeCaseId, case_code: caseCode, ...updated }, timestamp: Date.now() }); hideModal('editCaseModal'); openCaseDetails(activeCaseId); Swal.fire({ icon: 'success', title: 'تم التعديل محلياً', timer: 1000, showConfirmButton: false, background: '#0f172a' }); updatePendingBadge(); };
 window.calculateDate = function() { const startDate = document.getElementById('calcStartDate').value; if (!startDate) return Swal.fire('تنبيه', 'الرجاء اختيار تاريخ البداية', 'warning'); const days = parseInt(document.getElementById('calcDays').value) || 0; const date = new Date(startDate); date.setDate(date.getDate() + days); const resultStr = date.toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' }); document.getElementById('calcResult').innerText = resultStr; window.calculatedDate = date; };
 window.addCalculatedDateAsEvent = function() { if (!window.calculatedDate) return Swal.fire('تنبيه', 'قم بحساب التاريخ أولاً', 'warning'); const dateStr = window.calculatedDate.toISOString().split('T')[0]; const title = prompt('أدخل وصف الحدث:', 'موعد قانوني'); if (title) { db.events.add({ title, date: dateStr, type: 'legal' }); renderCalendar(); Swal.fire('تم', 'تم إضافة الحدث', 'success'); } };
 window.addCalculatedDateAsTask = function() { if (!window.calculatedDate) return Swal.fire('تنبيه', 'قم بحساب التاريخ أولاً', 'warning'); const dateStr = window.calculatedDate.toISOString().split('T')[0]; const desc = prompt('أدخل وصف المهمة:', 'مهمة قانونية'); if (desc) { db.tasks.add({ description: desc, date: dateStr, completed: false }); renderCalendar(); Swal.fire('تم', 'تم إضافة المهمة', 'success'); } };
@@ -1768,7 +1823,7 @@ window.saveProfessionalFile = async function() { const editingId = document.getE
         const fileCode = assertValidProfessionalFileCode(generateProfessionalFileCode(fileType));
         const editingId = document.getElementById('editingProfessionalFileId')?.value || '';
         const followup = { last_action_date: document.getElementById('professionalLastActionDate')?.value || null, last_action: document.getElementById('professionalLastAction')?.value.trim() || '', next_action_date: document.getElementById('professionalNextActionDate')?.value || null, next_action: document.getElementById('professionalNextAction')?.value.trim() || '' };
-        const file = { id: editingId || generateUUID(), office_id: currentOfficeId, file_code: editingId ? (await db.officeFiles.get(editingId)).file_code : fileCode, file_type: fileType, title, client_name: clientName, client_role: document.getElementById('professionalClientRole')?.value.trim() || '', client_phone: clientPhone, client_national_id: document.getElementById('professionalClientNationalId')?.value.trim() || '', client_email: document.getElementById('professionalClientEmail')?.value.trim() || '', client_address: document.getElementById('professionalClientAddress')?.value.trim() || '', opponent_name: document.getElementById('professionalOpponentName')?.value.trim() || '', opponent_role: document.getElementById('professionalOpponentRole')?.value.trim() || '', opponent_phone: document.getElementById('professionalOpponentPhone')?.value.trim() || '', opponent_national_id: document.getElementById('professionalOpponentNationalId')?.value.trim() || '', opponent_email: document.getElementById('professionalOpponentEmail')?.value.trim() || '', opponent_address: document.getElementById('professionalOpponentAddress')?.value.trim() || '', status: 'مفتوح', description: description || null, metadata: editingId ? ((await db.officeFiles.get(editingId)).metadata || {}) : {}, archived: false, created_at: editingId ? (await db.officeFiles.get(editingId)).created_at : new Date().toISOString(), updated_at: new Date().toISOString() };
+        const file = { id: editingId || generateUUID(), office_id: currentOfficeId, file_code: editingId ? (await db.officeFiles.get(editingId)).file_code : fileCode, file_type: fileType, title, authority_file_number: document.getElementById('professionalAuthorityFileNumber')?.value.trim() || '', authority_file_year: document.getElementById('professionalAuthorityFileYear')?.value.trim() || '', authority_name: document.getElementById('professionalAuthorityName')?.value.trim() || '', client_name: clientName, client_role: document.getElementById('professionalClientRole')?.value.trim() || '', client_phone: clientPhone, client_national_id: document.getElementById('professionalClientNationalId')?.value.trim() || '', client_email: document.getElementById('professionalClientEmail')?.value.trim() || '', client_address: document.getElementById('professionalClientAddress')?.value.trim() || '', opponent_name: document.getElementById('professionalOpponentName')?.value.trim() || '', opponent_role: document.getElementById('professionalOpponentRole')?.value.trim() || '', opponent_phone: document.getElementById('professionalOpponentPhone')?.value.trim() || '', opponent_national_id: document.getElementById('professionalOpponentNationalId')?.value.trim() || '', opponent_email: document.getElementById('professionalOpponentEmail')?.value.trim() || '', opponent_address: document.getElementById('professionalOpponentAddress')?.value.trim() || '', status: 'مفتوح', description: description || null, metadata: editingId ? ((await db.officeFiles.get(editingId)).metadata || {}) : {}, archived: false, created_at: editingId ? (await db.officeFiles.get(editingId)).created_at : new Date().toISOString(), updated_at: new Date().toISOString() };
         file.metadata.followup = followup;
         if (editingId) await db.officeFiles.update(editingId, file); else await db.officeFiles.add(file);
         const firstEvent = {
@@ -1931,4 +1986,44 @@ window.resolveSyncConflict = async function(id, choice) {
         const { error } = await supabaseClient.from('sync_conflicts').update(update).eq('id', id).eq('office_id', currentOfficeId); if (error) throw error;
         await db.syncConflicts.update(id, update); await refreshOwnerReviewCenter();
     } catch (error) { Swal.fire('تعذر حل التعارض', error.message || 'فشل حفظ القرار', 'error'); }
+};
+
+
+// ========== 21. لوحة تحكم المالك ==========
+window.loadDashboardSummary = async function() {
+    if (!currentOfficeId) return;
+    const today = new Date(); const todayKey = today.toISOString().slice(0, 10); const weekEnd = new Date(today); weekEnd.setDate(today.getDate() + 7);
+    const activeCases = await db.cases.filter(c => c.office_id === currentOfficeId && !c.archived).toArray();
+    const sessions = await db.sessions.filter(s => s.office_id === currentOfficeId).toArray();
+    const todaySessions = sessions.filter(s => String(s.session_date || '').slice(0, 10) === todayKey);
+    const weekSessions = sessions.filter(s => { const d = new Date(s.session_date); return d >= new Date(todayKey) && d <= weekEnd; });
+    const postponed = sessions.filter(s => /مؤجل|مؤجلة|postpon/i.test(String(s.case_status || '')));
+    const upcomingCaseIds = new Set(sessions.filter(s => new Date(s.session_date) >= today && !/انتهت|تم الحكم|محكوم|مشطوب/i.test(String(s.case_status || ''))).map(s => String(s.case_id)));
+    const withoutNext = activeCases.filter(c => !upcomingCaseIds.has(String(c.id)));
+    const tasks = await db.tasks.toArray(); const lateTasks = tasks.filter(t => !t.completed && t.date && t.date < todayKey && (!t.office_id || t.office_id === currentOfficeId));
+    const fees = await db.fees.toArray(); const remaining = fees.reduce((sum, f) => sum + Math.max(0, Number(f.remaining ?? Number(f.total || 0) - Number(f.paid || 0))), 0);
+    const pending = await db.pendingOperations.count();
+    const set = (id, value) => { const el = document.getElementById(id); if (el) el.innerText = value; };
+    set('dashActiveCases', activeCases.length); set('dashTodaySessions', todaySessions.length); set('dashWeekSessions', weekSessions.length); set('dashPostponed', postponed.length); set('dashLateTasks', lateTasks.length); set('dashNoNextSession', withoutNext.length); set('dashRemainingFees', `${remaining.toFixed(2)} ج.م`); set('dashPendingOps', pending);
+    const state = document.getElementById('dashboardSyncState'); if (state) { state.innerText = navigator.onLine ? 'متصل' : 'دون اتصال'; state.className = `badge ${navigator.onLine ? 'bg-success' : 'bg-warning text-dark'}`; }
+    const latestNotes = await db.notes.filter(n => n.office_id === currentOfficeId).toArray(); latestNotes.sort((a,b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
+    const activity = document.getElementById('dashboardRecentActivity'); if (activity) activity.innerText = latestNotes.length ? `آخر ملاحظة فريق: ${latestNotes[0].content || ''}` : 'لا توجد تعديلات أو ملاحظات فريق حديثة.';
+};
+window.addEventListener('online', () => loadDashboardSummary()); window.addEventListener('offline', () => loadDashboardSummary());
+
+
+// إثراء شاشة تفاصيل القضية بعد الحفاظ على دوال العرض القديمة.
+const legacyOpenCaseDetails = window.openCaseDetails;
+window.openCaseDetails = async function(id) {
+    await legacyOpenCaseDetails(id);
+    const c = await db.cases.get(id);
+    const parties = await db.caseParties.where('case_id').equals(id).toArray();
+    const caseHost = document.getElementById('caseDetailContent');
+    if (caseHost && parties.length) {
+        const clients = parties.filter(p => p.party_type === 'client'); const opponents = parties.filter(p => p.party_type === 'opponent');
+        const partyHtml = (title, rows) => rows.length ? `<div class="party-card"><h6 class="gold-text">${title}</h6>${rows.map(p => `<div class="border-bottom py-2"><strong>${escapeHtml(p.name)}</strong> · ${escapeHtml(p.role || '')} · ${escapeHtml(p.phone || '')}<div class="small">التوكيل: ${escapeHtml(p.power_of_attorney_number || '-')} / ${escapeHtml(p.power_of_attorney_year || '-')} · مكتب التوثيق: ${escapeHtml(p.notary_office || '-')}</div></div>`).join('')}</div>` : '';
+        caseHost.innerHTML += `<div class="record-row"><strong>مرحلة التقاضي:</strong> ${escapeHtml(c?.proceeding_type || '-')} · <strong>الأهمية:</strong> ${escapeHtml(c?.importance || 'normal')} · <strong>المدينة:</strong> ${escapeHtml(c?.city || '-')}<br><strong>التنبيهات:</strong> ${escapeHtml(c?.alert_notes || '-')}</div>` + partyHtml('العملاء', clients) + partyHtml('الخصوم', opponents);
+    }
+    const logs = await db.sessionChangeLog.where('office_id').equals(currentOfficeId).toArray(); const caseSessions = await db.sessions.where('case_id').equals(id).toArray(); const sessionIds = new Set(caseSessions.map(s => String(s.id))); const relevant = logs.filter(l => sessionIds.has(String(l.session_id))).sort((a,b) => new Date(b.changed_at) - new Date(a.changed_at));
+    if (relevant.length) document.getElementById('caseDetailSessions').insertAdjacentHTML('beforeend', `<hr><h6 class="gold-text">سجل تغييرات الجلسات</h6>${relevant.map(l => `<div class="small border-bottom py-1">${new Date(l.changed_at).toLocaleString('ar-EG')} — ${escapeHtml(l.action)}</div>`).join('')}`);
 };
