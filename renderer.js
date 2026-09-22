@@ -2027,3 +2027,21 @@ window.openCaseDetails = async function(id) {
     const logs = await db.sessionChangeLog.where('office_id').equals(currentOfficeId).toArray(); const caseSessions = await db.sessions.where('case_id').equals(id).toArray(); const sessionIds = new Set(caseSessions.map(s => String(s.id))); const relevant = logs.filter(l => sessionIds.has(String(l.session_id))).sort((a,b) => new Date(b.changed_at) - new Date(a.changed_at));
     if (relevant.length) document.getElementById('caseDetailSessions').insertAdjacentHTML('beforeend', `<hr><h6 class="gold-text">سجل تغييرات الجلسات</h6>${relevant.map(l => `<div class="small border-bottom py-1">${new Date(l.changed_at).toLocaleString('ar-EG')} — ${escapeHtml(l.action)}</div>`).join('')}`);
 };
+
+
+window.addCaseStage = async function(parentId) {
+    if (!ownerOnly('إضافة مرحلة تقاضٍ')) return;
+    const parent = await db.cases.get(parentId); if (!parent) return;
+    const result = await Swal.fire({ title: 'إضافة مرحلة تقاضٍ مرتبطة', html: '<select id="stageInput" class="swal2-select"><option value="appeal">استئناف</option><option value="retrial">التماس إعادة نظر</option><option value="cassation">طعن</option><option value="enforcement">تنفيذ</option></select><input id="stageNumberInput" class="swal2-input" placeholder="رقم القضية في المرحلة الجديدة"><input id="stageYearInput" class="swal2-input" placeholder="سنة القضية">', focusConfirm: false, showCancelButton: true, confirmButtonText: 'إنشاء المرحلة', cancelButtonText: 'إلغاء', preConfirm: () => ({ type: document.getElementById('stageInput').value, number: document.getElementById('stageNumberInput').value.trim(), year: document.getElementById('stageYearInput').value.trim() }) });
+    if (!result.isConfirmed) return;
+    const code = await generateCaseCode(); const now = new Date().toISOString();
+    const stage = { ...parent, id: 'C_' + Date.now(), case_code: code, case_number: result.value.number || '', case_year: result.value.year || '', proceeding_type: result.value.type, parent_case_id: parent.id, appeal_of_case_id: parent.id, root_case_id: parent.root_case_id || parent.id, created_at: now, archived: 0 };
+    delete stage.updated_at; await db.cases.add(stage); await db.pendingOperations.add({ operation: 'insert_case', data: stage, timestamp: Date.now() });
+    Swal.fire({ icon: 'success', title: 'تم إنشاء المرحلة', text: `كود المرحلة: ${code}`, timer: 1800, showConfirmButton: false }); await loadCasesList();
+};
+
+const previousCaseDetailWrapper = window.openCaseDetails;
+window.openCaseDetails = async function(id) {
+    await previousCaseDetailWrapper(id);
+    if (currentUserRole === 'manager' && document.getElementById('caseActionsPanel')) document.getElementById('caseActionsPanel').insertAdjacentHTML('beforeend', '<button class="btn btn-outline-primary" onclick="addCaseStage(activeCaseId)"><i class="bi bi-diagram-3"></i> إضافة مرحلة تقاضٍ</button>');
+};
