@@ -92,9 +92,9 @@ db.version(10).stores({
 
 // النموذج العام: ملف قانوني رئيسي، مراحل قضائية، خدمات غير قضائية، وطلبات اعتماد الهاتف.
 db.version(11).stores({
-    legalFiles: 'id, office_id, file_code, file_type, status, client_name, updated_at',
+    legalFiles: 'id, office_id, file_code, file_type, status, client_name, responsible_user_id, updated_at',
     proceedings: 'id, legal_file_id, office_id, proceeding_type, parent_proceeding_id, appeal_of_proceeding_id, status, updated_at',
-    serviceActions: 'id, legal_file_id, office_id, action_type, next_followup_at, status, updated_at',
+    serviceActions: 'id, legal_file_id, office_id, action_type, sequence_order, step_status, next_followup_at, status, updated_at',
     approvalRequests: 'id, office_id, requested_by, entity_type, entity_id, status, created_at',
     auditLogs: '++id, office_id, entity_type, entity_id, action, created_at',
     syncConflicts: '++id, office_id, entity_type, entity_id, status, created_at'
@@ -637,7 +637,7 @@ function filterCasesList() {
         const reference = judicial ? `${record.case_number || ''}/${record.case_year || ''}` : record.file_code;
         return `<div class="case-card-item" data-id="${record.id}" onclick="${judicial ? `openCaseDetails('${record.id}')` : `selectProfessionalFile('${record.id}')`}">
           <div class="d-flex justify-content-between gap-2"><strong class="gold-text">${escapeHtml(record.client_name || record.title)}</strong><span class="badge ${judicial ? 'bg-primary' : 'bg-success'}">${label}</span></div>
-          <div class="small mt-1">${escapeHtml(record.title || record.case_subject || '')}</div>
+          <div class="small mt-1">${escapeHtml(record.title || record.case_subject || '')}</div>${judicial ? `<span class="badge bg-light text-dark case-status-badge mt-1">${escapeHtml(record.status || 'جديدة')}</span>` : ''}
           <div class="small">${escapeHtml(judicial ? (record.court_name || 'محكمة غير محددة') : 'ملف بلا جلسات محكمة')}${judicial && record.case_type ? ` | ${escapeHtml(record.case_type)}` : ''}</div>
           <div class="small text-warning mt-1">الكود: ${escapeHtml(record.case_code || record.file_code || 'غير محدد')} · المرجع: ${escapeHtml(reference)}</div>
         </div>`;
@@ -752,6 +752,7 @@ window.saveNewCase = async function() {
                         proceeding_type: document.getElementById('case_stage')?.value || 'first_instance',
                         importance: document.getElementById('case_importance')?.value || 'normal',
                         alert_notes: document.getElementById('case_alert_notes')?.value || '',
+                        status: document.getElementById('case_status')?.value || 'جديدة',
                         city: document.getElementById('case_city')?.value || '',
                         // يجب توليد الكود قبل إنشاء الكائن وقبل أي كتابة في IndexedDB.
                         case_code: await generateCaseCode(),
@@ -760,6 +761,15 @@ window.saveNewCase = async function() {
 
         // التحقق النهائي قبل الحفظ المحلي؛ لا نسمح بإنشاء قضية ناقصة الكود.
     caseData.case_code = assertValidCaseCode(caseData.case_code);
+    const now = new Date().toISOString();
+    const legalFile = { id: `LF-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, office_id: currentOfficeId, file_code: caseData.case_code, file_type: 'judicial', title: caseData.case_subject || `ملف ${caseData.client_name}`, status: 'new', client_name: caseData.client_name, client_phone: caseData.client_phone, client_email: caseData.client_email, client_national_id: caseData.client_national_id, client_address: caseData.client_address, description: caseData.case_subject || '', opened_at: now.slice(0, 10), metadata: { source: 'case_creation' }, created_at: now, updated_at: now };
+    const proceeding = { id: `PR-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, legal_file_id: legalFile.id, office_id: currentOfficeId, proceeding_type: caseData.proceeding_type, court_name: caseData.court_name, circuit: caseData.circuit, case_number: caseData.case_number, case_year: caseData.case_year, city: caseData.city, client_position: caseData.client_role, opponent_name: caseData.opponent_name, status: 'open', metadata: {}, created_at: now, updated_at: now };
+    caseData.legal_file_id = legalFile.id;
+    caseData.proceeding_id = proceeding.id;
+    await db.legalFiles.put(legalFile);
+    await db.proceedings.put(proceeding);
+    await db.pendingOperations.add({ operation: 'upsert_legal_file', data: legalFile, timestamp: Date.now() });
+    await db.pendingOperations.add({ operation: 'upsert_proceeding', data: proceeding, timestamp: Date.now() });
     await db.cases.add(caseData);
     const primaryParties = [
         { id: generateUUID(), office_id: currentOfficeId, case_id: caseData.id, party_type: 'client', name: caseData.client_name, role: caseData.client_role, phone: caseData.client_phone, national_id: caseData.client_national_id, email: caseData.client_email, address: caseData.client_address, power_of_attorney_number: document.getElementById('client_power_number')?.value || '', power_of_attorney_year: document.getElementById('client_power_year')?.value || '', notary_office: document.getElementById('client_notary_office')?.value || '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
@@ -769,6 +779,10 @@ window.saveNewCase = async function() {
     if (partyRows.length) { await db.caseParties.bulkAdd(partyRows); for (const party of partyRows) await db.pendingOperations.add({ operation: 'upsert_case_party', data: party, timestamp: Date.now() }); }
     if (supabaseClient && currentOfficeId) {
         try {
+            const { error: fileError } = await supabaseClient.from('legal_files').upsert([legalFile], { onConflict: 'id' });
+            if (fileError) throw fileError;
+            const { error: proceedingError } = await supabaseClient.from('proceedings').upsert([proceeding], { onConflict: 'id' });
+            if (proceedingError) throw proceedingError;
             const { data: inserted, error } = await supabaseClient.from('cases').insert([caseData]).select('case_code');
             if (!error && inserted && inserted[0] && inserted[0].case_code === caseData.case_code) {
                 // يجب أن يعيد الخادم نفس الكود الذي ولّده qayd، وليس كودًا جديدًا.
@@ -954,6 +968,8 @@ window.renderCalendar = async function() {
             html += `<div class="calendar-day ${isToday ? 'today' : ''}" onclick="showDayDetails('${dateStr}')"><div class="day-number">${d}</div><div class="d-flex flex-column gap-1 w-100">${badges}</div></div>`;
         }
         document.getElementById('calendarDays').innerHTML = html;
+        const monthList = document.getElementById('agendaMonthCases');
+        if (monthList) { const caseMap = new Map((await db.cases.toArray()).map(c => [String(c.id), c])); const monthRows = sessions.filter(s => s.session_date && s.session_date.startsWith(monthStr)).sort((a,b) => String(a.session_date).localeCompare(String(b.session_date))); monthList.innerHTML = monthRows.length ? monthRows.map(s => { const c = caseMap.get(String(s.case_id)); return `<div class="agenda-month-item" onclick="openCaseDetails('${escapeHtml(s.case_id)}')"><div class="date">${escapeHtml(String(s.session_date).slice(0,16).replace('T',' '))}</div><strong>${escapeHtml(c?.client_name || 'قضية غير معروفة')}</strong><div class="small text-muted">${escapeHtml(c?.case_code || '')} · ${escapeHtml(s.court_name || c?.court_name || 'المحكمة غير محددة')}</div><span class="badge bg-secondary mt-1">${escapeHtml(s.case_status || 'جديدة')}</span></div>`; }).join('') : '<div class="text-muted text-center py-3">لا توجد جلسات أو قضايا مجدولة في هذا الشهر.</div>'; }
         loadUpcomingEvents();
     } catch (e) { console.error('خطأ في renderCalendar:', e); }
 };
@@ -1133,6 +1149,18 @@ async function pushDesktopRecord(entityType, entityId, operation, payload) {
 async function uploadAllLocalOfficeData() {
     if (!(await ensureDesktopSupabaseSession())) {
         throw new Error('تعذر تسجيل دخول مالك المكتب إلى Supabase');
+    }
+    const legalFiles = await db.legalFiles.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of legalFiles) {
+        const payload = { ...record, status: normalizeLegalFileStatus(record.status) };
+        const { error } = await supabaseClient.from('legal_files').upsert(payload, { onConflict: 'id' });
+        if (error) throw error;
+        if (payload.status !== record.status) await db.legalFiles.update(record.id, { status: payload.status });
+    }
+    const proceedings = await db.proceedings.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of proceedings) {
+        const { error } = await supabaseClient.from('proceedings').upsert(record, { onConflict: 'id' });
+        if (error) throw error;
     }
     const cases = await db.cases.where('office_id').equals(currentOfficeId).toArray();
     for (const record of cases) await pushDesktopRecord('cases', record.id, 'update', record);
@@ -1455,7 +1483,7 @@ async function downloadFromSupabase() {
     for (const [tableName, table] of [['legal_files', db.legalFiles], ['proceedings', db.proceedings], ['service_actions', db.serviceActions], ['approval_requests', db.approvalRequests]]) {
         const { data, error } = await supabaseClient.from(tableName).select('*').eq('office_id', currentOfficeId).limit(5000);
         if (error) { console.error(`خطأ في تحميل ${tableName}:`, error); continue; }
-        for (const row of data || []) await table.put(row);
+        for (const row of data || []) await table.put(tableName === 'legal_files' ? { ...row, status: normalizeLegalFileStatus(row.status) } : row);
     }
 
     const { data: remoteNotes, error: notesError } = await supabaseClient.from('notes').select('id, office_id, case_id, office_file_id, content, author_user_id, created_at, updated_at').eq('office_id', currentOfficeId).order('updated_at', { ascending: false }).limit(5000);
@@ -1581,10 +1609,28 @@ window.openClientDetails = async function() {
 // فتح نموذج تعديل القضية وتعبئة بيانات العميل والخصم الموجودة محليًا.
 window.openEditCaseModalFromPanel = async function() {
     const c = await db.cases.get(activeCaseId); if (!c) return;
-    const values = { edit_c_name: c.client_name, edit_c_phone: c.client_phone, edit_c_national_id: c.client_national_id, edit_c_email: c.client_email, edit_c_address: c.client_address, edit_c_opponent: c.opponent_name, edit_c_opponent_role: c.opponent_role, edit_c_opponent_national_id: c.opponent_national_id, edit_c_opponent_email: c.opponent_email, edit_c_opponent_phone: c.opponent_phone, edit_c_opponent_address: c.opponent_address, edit_c_num: c.case_number, edit_c_year: c.case_year, edit_c_court: c.court_name, edit_c_circuit: c.circuit, edit_case_type: c.case_type, edit_c_subject: c.case_subject, edit_case_stage: c.proceeding_type, edit_case_importance: c.importance, edit_c_city: c.city, edit_c_alert_notes: c.alert_notes };
+    const values = { edit_c_name: c.client_name, edit_c_phone: c.client_phone, edit_c_national_id: c.client_national_id, edit_c_email: c.client_email, edit_c_address: c.client_address, edit_c_opponent: c.opponent_name, edit_c_opponent_role: c.opponent_role, edit_c_opponent_national_id: c.opponent_national_id, edit_c_opponent_email: c.opponent_email, edit_c_opponent_phone: c.opponent_phone, edit_c_opponent_address: c.opponent_address, edit_c_num: c.case_number, edit_c_year: c.case_year, edit_c_court: c.court_name, edit_c_circuit: c.circuit, edit_case_type: c.case_type, edit_c_subject: c.case_subject, edit_case_stage: c.proceeding_type, edit_case_importance: c.importance, edit_case_status: c.status || 'جديدة', edit_c_city: c.city, edit_c_alert_notes: c.alert_notes };
     Object.entries(values).forEach(([id, value]) => { const el = document.getElementById(id); if (el) el.value = value || ''; });
+    document.getElementById('editAdditionalClients').innerHTML = ''; document.getElementById('editAdditionalOpponents').innerHTML = '';
+    const parties = await db.caseParties.where('case_id').equals(activeCaseId).toArray();
+    parties.filter(p => p.party_type === 'client' && p.name !== c.client_name).forEach(p => addEditCasePartyRow('client', p));
+    parties.filter(p => p.party_type === 'opponent' && p.name !== c.opponent_name).forEach(p => addEditCasePartyRow('opponent', p));
     showModal('editCaseModal');
 };
+
+window.addEditCasePartyRow = function(type, party = {}) {
+    const host = document.getElementById(type === 'client' ? 'editAdditionalClients' : 'editAdditionalOpponents'); if (!host) return;
+    const key = `${type}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    host.insertAdjacentHTML('beforeend', `<div class="col-12 border rounded p-2 mt-2" data-edit-party-row="${key}"><div class="row g-2"><div class="col-md-4"><input class="form-control edit-party-name" placeholder="اسم ${type === 'client' ? 'العميل' : 'الخصم'}" value="${escapeHtml(party.name || '')}"></div><div class="col-md-3"><input class="form-control edit-party-role" placeholder="الصفة" value="${escapeHtml(party.role || '')}"></div><div class="col-md-3"><input class="form-control edit-party-phone" placeholder="الهاتف" value="${escapeHtml(party.phone || '')}"></div><div class="col-md-2"><button type="button" class="btn btn-outline-danger w-100" onclick="this.closest('[data-edit-party-row]').remove()">حذف</button></div><div class="col-md-3"><input class="form-control edit-party-power-number" placeholder="رقم التوكيل" value="${escapeHtml(party.power_of_attorney_number || '')}"></div><div class="col-md-2"><input class="form-control edit-party-power-year" placeholder="سنة التوكيل" value="${escapeHtml(party.power_of_attorney_year || '')}"></div><div class="col-md-4"><input class="form-control edit-party-notary" placeholder="مكتب التوثيق" value="${escapeHtml(party.notary_office || '')}"></div></div></div>`);
+};
+function collectEditCaseParties(caseId) {
+    const rows = [];
+    for (const type of ['client', 'opponent']) document.querySelectorAll(`#${type === 'client' ? 'editAdditionalClients' : 'editAdditionalOpponents'} [data-edit-party-row]`).forEach(row => {
+        const name = row.querySelector('.edit-party-name')?.value.trim(); if (!name) return;
+        rows.push({ id: generateUUID(), office_id: currentOfficeId, case_id: caseId, party_type: type, name, role: row.querySelector('.edit-party-role')?.value.trim() || '', phone: row.querySelector('.edit-party-phone')?.value.trim() || '', power_of_attorney_number: row.querySelector('.edit-party-power-number')?.value.trim() || '', power_of_attorney_year: row.querySelector('.edit-party-power-year')?.value.trim() || '', notary_office: row.querySelector('.edit-party-notary')?.value.trim() || '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    });
+    return rows;
+}
 
 // اختيار عدة مستندات ثم نقلها أو نسخها إلى مجلد «مستندات العميل».
 window.addCaseDocument = async function() {
@@ -1711,7 +1757,7 @@ window.addEventListener('keydown', (event) => {
     if (event.key.toLowerCase() === 's') { event.preventDefault(); syncWithSupabase(); }
 });
 
-window.saveEditedCase = async function() { if (!ownerOnly('تعديل القضية')) return; const updated = { client_name: document.getElementById('edit_c_name').value, client_phone: document.getElementById('edit_c_phone').value, client_national_id: document.getElementById('edit_c_national_id')?.value || '', client_email: document.getElementById('edit_c_email')?.value || '', client_address: document.getElementById('edit_c_address')?.value || '', opponent_name: document.getElementById('edit_c_opponent').value, opponent_role: document.getElementById('edit_c_opponent_role')?.value || '', opponent_national_id: document.getElementById('edit_c_opponent_national_id')?.value || '', opponent_email: document.getElementById('edit_c_opponent_email')?.value || '', opponent_phone: document.getElementById('edit_c_opponent_phone')?.value || '', opponent_address: document.getElementById('edit_c_opponent_address')?.value || '', case_number: document.getElementById('edit_c_num').value, case_year: document.getElementById('edit_c_year').value, court_name: document.getElementById('edit_c_court').value, circuit: document.getElementById('edit_c_circuit').value, case_type: document.getElementById('edit_case_type').value, case_subject: document.getElementById('edit_c_subject').value, proceeding_type: document.getElementById('edit_case_stage')?.value || 'first_instance', importance: document.getElementById('edit_case_importance')?.value || 'normal', city: document.getElementById('edit_c_city')?.value || '', alert_notes: document.getElementById('edit_c_alert_notes')?.value || '' }; const currentCase = await db.cases.get(activeCaseId); if (!currentCase) throw new Error('القضية غير موجودة'); const caseCode = assertValidCaseCode(currentCase.case_code); await db.cases.update(activeCaseId, updated); await db.pendingOperations.add({ operation: 'update_case', data: { id: activeCaseId, case_code: caseCode, ...updated }, timestamp: Date.now() }); hideModal('editCaseModal'); openCaseDetails(activeCaseId); Swal.fire({ icon: 'success', title: 'تم التعديل محلياً', timer: 1000, showConfirmButton: false, background: '#0f172a' }); updatePendingBadge(); };
+window.saveEditedCase = async function() { if (!ownerOnly('تعديل القضية')) return; const updated = { client_name: document.getElementById('edit_c_name').value, client_phone: document.getElementById('edit_c_phone').value, client_national_id: document.getElementById('edit_c_national_id')?.value || '', client_email: document.getElementById('edit_c_email')?.value || '', client_address: document.getElementById('edit_c_address')?.value || '', opponent_name: document.getElementById('edit_c_opponent').value, opponent_role: document.getElementById('edit_c_opponent_role')?.value || '', opponent_national_id: document.getElementById('edit_c_opponent_national_id')?.value || '', opponent_email: document.getElementById('edit_c_opponent_email')?.value || '', opponent_phone: document.getElementById('edit_c_opponent_phone')?.value || '', opponent_address: document.getElementById('edit_c_opponent_address')?.value || '', case_number: document.getElementById('edit_c_num').value, case_year: document.getElementById('edit_c_year').value, court_name: document.getElementById('edit_c_court').value, circuit: document.getElementById('edit_c_circuit').value, case_type: document.getElementById('edit_case_type').value, case_subject: document.getElementById('edit_c_subject').value, proceeding_type: document.getElementById('edit_case_stage')?.value || 'first_instance', importance: document.getElementById('edit_case_importance')?.value || 'normal', city: document.getElementById('edit_c_city')?.value || '', alert_notes: document.getElementById('edit_c_alert_notes')?.value || '', status: document.getElementById('edit_case_status')?.value || 'جديدة' }; const currentCase = await db.cases.get(activeCaseId); if (!currentCase) throw new Error('القضية غير موجودة'); const caseCode = assertValidCaseCode(currentCase.case_code); await db.cases.update(activeCaseId, updated); await db.pendingOperations.add({ operation: 'update_case', data: { id: activeCaseId, case_code: caseCode, ...updated }, timestamp: Date.now() }); const newParties = collectEditCaseParties(activeCaseId); if (newParties.length) { await db.caseParties.bulkAdd(newParties); for (const party of newParties) await db.pendingOperations.add({ operation: 'upsert_case_party', data: party, timestamp: Date.now() }); } hideModal('editCaseModal'); openCaseDetails(activeCaseId); Swal.fire({ icon: 'success', title: 'تم التعديل محلياً', timer: 1000, showConfirmButton: false, background: '#0f172a' }); updatePendingBadge(); };
 window.calculateDate = function() { const startDate = document.getElementById('calcStartDate').value; if (!startDate) return Swal.fire('تنبيه', 'الرجاء اختيار تاريخ البداية', 'warning'); const days = parseInt(document.getElementById('calcDays').value) || 0; const date = new Date(startDate); date.setDate(date.getDate() + days); const resultStr = date.toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' }); document.getElementById('calcResult').innerText = resultStr; window.calculatedDate = date; };
 window.addCalculatedDateAsEvent = function() { if (!window.calculatedDate) return Swal.fire('تنبيه', 'قم بحساب التاريخ أولاً', 'warning'); const dateStr = window.calculatedDate.toISOString().split('T')[0]; const title = prompt('أدخل وصف الحدث:', 'موعد قانوني'); if (title) { db.events.add({ title, date: dateStr, type: 'legal' }); renderCalendar(); Swal.fire('تم', 'تم إضافة الحدث', 'success'); } };
 window.addCalculatedDateAsTask = function() { if (!window.calculatedDate) return Swal.fire('تنبيه', 'قم بحساب التاريخ أولاً', 'warning'); const dateStr = window.calculatedDate.toISOString().split('T')[0]; const desc = prompt('أدخل وصف المهمة:', 'مهمة قانونية'); if (desc) { db.tasks.add({ description: desc, date: dateStr, completed: false }); renderCalendar(); Swal.fire('تم', 'تم إضافة المهمة', 'success'); } };
@@ -1871,6 +1917,8 @@ window.openProfessionalFilesPanel = async function() { showModal('professionalFi
 
 // ========== 19. النموذج العام للملفات القانونية ==========
 const legalFileTypeLabels = { judicial: 'قضائي', real_estate: 'تسجيل عقاري', corporate: 'شركات', power_of_attorney: 'توكيل', contract: 'عقد', legal_consultation: 'استشارة', government_service: 'خدمة حكومية', enforcement: 'تنفيذ', other: 'أخرى' };
+const legalFileStatusLabels = { new: 'جديد', submitting: 'قيد الرفع', in_progress: 'قيد العمل', needs_action: 'يحتاج إجراء', on_hold: 'متوقف', completed: 'مكتمل', archived: 'مؤرشف', open: 'جديد' };
+function normalizeLegalFileStatus(status) { const value = String(status || '').trim(); return value === 'open' || !legalFileStatusLabels[value] ? 'new' : value; }
 const proceedingTypeLabels = { first_instance: 'أول درجة', appeal: 'استئناف', cassation: 'نقض', retrial: 'إعادة نظر', opposition: 'معارضة', enforcement: 'تنفيذ', execution_objection: 'إشكال تنفيذ', other: 'أخرى' };
 function generateLegalFileCode(type) { const prefix = { judicial: 'JU', real_estate: 'RE', corporate: 'CO', power_of_attorney: 'PO', contract: 'CT', legal_consultation: 'LC', government_service: 'GS', enforcement: 'EX', other: 'OT' }[type] || 'OT'; return `${prefix}-${String(new Date().getFullYear()).slice(-2)}-${String(Date.now()).slice(-6)}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`; }
 window.openLegalFileModal = function() {
@@ -1890,7 +1938,7 @@ window.saveLegalFile = async function() {
         const clientName = document.getElementById('legalFileClient').value.trim();
         if (!title || !clientName) throw new Error('أدخل عنوان الملف واسم العميل');
         const now = new Date().toISOString();
-        const file = { id: `MAT-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, office_id: currentOfficeId, file_code: generateLegalFileCode(fileType), file_type: fileType, title, status: 'open', client_name: clientName, client_phone: document.getElementById('legalFilePhone').value.trim(), description: document.getElementById('legalFileDescription').value.trim(), opened_at: now.slice(0, 10), metadata: {}, created_at: now, updated_at: now };
+        const file = { id: `MAT-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, office_id: currentOfficeId, file_code: generateLegalFileCode(fileType), file_type: fileType, title, status: 'new', client_name: clientName, client_phone: document.getElementById('legalFilePhone').value.trim(), description: document.getElementById('legalFileDescription').value.trim(), opened_at: now.slice(0, 10), metadata: {}, created_at: now, updated_at: now };
         await db.legalFiles.put(file);
         await db.pendingOperations.add({ operation: 'upsert_legal_file', data: file, timestamp: Date.now() });
         if (fileType === 'judicial') {
@@ -1898,7 +1946,7 @@ window.saveLegalFile = async function() {
             await db.proceedings.put(proceeding);
             await db.pendingOperations.add({ operation: 'upsert_proceeding', data: proceeding, timestamp: Date.now() });
         } else {
-            const action = { id: `ACT-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, legal_file_id: file.id, office_id: currentOfficeId, action_type: document.getElementById('legalActionType').value.trim() || 'فتح الملف ومراجعة المستندات', authority: document.getElementById('legalAuthority').value.trim(), next_followup_at: document.getElementById('legalFollowup').value || null, status: 'new', notes: '', created_at: now, updated_at: now };
+            const action = { id: `ACT-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, legal_file_id: file.id, office_id: currentOfficeId, action_type: document.getElementById('legalActionType').value.trim() || 'فتح الملف ومراجعة المستندات', sequence_order: 1, step_status: 'pending', authority: document.getElementById('legalAuthority').value.trim(), next_followup_at: document.getElementById('legalFollowup').value || null, status: 'new', notes: '', created_at: now, updated_at: now };
             await db.serviceActions.put(action);
             await db.pendingOperations.add({ operation: 'upsert_service_action', data: action, timestamp: Date.now() });
         }
@@ -1910,7 +1958,7 @@ async function renderLegalFiles() {
     const container = document.getElementById('legalFilesList'); if (!container || !currentOfficeId) return;
     const files = await db.legalFiles.where('office_id').equals(currentOfficeId).toArray(); files.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
     if (!files.length) { container.innerHTML = '<div class="text-muted text-center py-4">لا توجد ملفات قانونية. ابدأ بإنشاء ملف رئيسي.</div>'; return; }
-    container.innerHTML = files.map(file => `<div class="professional-file-row"><div><strong>${escapeHtml(file.title)}</strong><div class="small text-muted">${legalFileTypeLabels[file.file_type] || file.file_type} · ${escapeHtml(file.client_name)}</div></div><span class="professional-code">${escapeHtml(file.file_code)}</span><button class="btn btn-sm btn-outline-primary" onclick="openLegalFileDetails('${escapeHtml(file.id)}')">المراحل والإجراءات</button></div>`).join('');
+    container.innerHTML = files.map(file => { const status = normalizeLegalFileStatus(file.status); return `<div class="professional-file-row"><div><strong>${escapeHtml(file.title)}</strong><div class="small text-muted">${legalFileTypeLabels[file.file_type] || file.file_type} · ${escapeHtml(file.client_name)}</div></div><span class="professional-code">${escapeHtml(file.file_code)}</span><span class="badge bg-secondary">${legalFileStatusLabels[status]}</span><button class="btn btn-sm btn-outline-primary" onclick="openLegalFileDetails('${escapeHtml(file.id)}')">فتح الملف</button></div>`; }).join('');
 }
 window.openLegalFilesPanel = async function() { showModal('legalFilesModal'); await renderLegalFiles(); };
 window.openLegalFileDetails = async function(fileId) {
@@ -1918,8 +1966,9 @@ window.openLegalFileDetails = async function(fileId) {
     const proceedings = await db.proceedings.where('legal_file_id').equals(fileId).toArray();
     const actions = await db.serviceActions.where('legal_file_id').equals(fileId).toArray();
     const stages = proceedings.map(p => `<div class="border rounded p-2 mb-2"><strong>${proceedingTypeLabels[p.proceeding_type] || p.proceeding_type}</strong> · ${escapeHtml(p.court_name || 'محكمة غير محددة')} · ${escapeHtml(p.case_number || 'رقم غير محدد')}<div class="small text-muted">${escapeHtml(p.status || '')}</div></div>`).join('');
-    const service = actions.map(a => `<div class="border rounded p-2 mb-2"><strong>${escapeHtml(a.action_type)}</strong> · ${escapeHtml(a.authority || 'جهة غير محددة')}<div class="small text-muted">${escapeHtml(a.status || '')} ${a.next_followup_at ? `· متابعة ${a.next_followup_at}` : ''}</div></div>`).join('');
-    await Swal.fire({ title: file.title, html: `<div class="text-end"><p>${escapeHtml(file.client_name)} · <strong>${escapeHtml(file.file_code)}</strong></p><hr><h6>المراحل القضائية</h6>${stages || '<p class="text-muted">لا توجد مراحل إضافية.</p>'}<h6>إجراءات الخدمات</h6>${service || '<p class="text-muted">لا توجد إجراءات مسجلة.</p>'}</div>`, confirmButtonText: 'إغلاق', background: '#fff', color: '#172b45', width: 720 });
+    const service = actions.sort((a,b) => Number(a.sequence_order || 1) - Number(b.sequence_order || 1)).map(a => `<div class="border rounded p-2 mb-2"><strong>${escapeHtml(a.step_title || a.action_type)}</strong> · ${escapeHtml(a.authority || 'جهة غير محددة')}<div class="small text-muted">${escapeHtml(a.step_status || a.status || '')} ${a.next_followup_at ? `· متابعة ${a.next_followup_at}` : ''}${a.blocked_reason ? ` · سبب التعطيل: ${escapeHtml(a.blocked_reason)}` : ''}</div></div>`).join('');
+    const status = normalizeLegalFileStatus(file.status);
+    await Swal.fire({ title: file.title, html: `<div class="text-end"><p>${escapeHtml(file.client_name)} · <strong>${escapeHtml(file.file_code)}</strong> · <span class="badge bg-secondary">${legalFileStatusLabels[status]}</span></p><hr><h6>المراحل القضائية</h6>${stages || '<p class="text-muted">لا توجد مراحل إضافية.</p>'}<h6>إجراءات الخدمات</h6>${service || '<p class="text-muted">لا توجد إجراءات مسجلة.</p>'}</div>`, confirmButtonText: 'إغلاق', background: '#fff', color: '#172b45', width: 720 });
 };
 
 window.showTeamManagement = function() { if (!ownerOnly('إدارة الفريق')) return; showModal('teamManagementModal'); };
@@ -2011,6 +2060,9 @@ window.loadDashboardSummary = async function() {
     if (!currentOfficeId) return;
     const today = new Date(); const todayKey = today.toISOString().slice(0, 10); const weekEnd = new Date(today); weekEnd.setDate(today.getDate() + 7);
     const activeCases = await db.cases.filter(c => c.office_id === currentOfficeId && !c.archived).toArray();
+    const legalFiles = await db.legalFiles.where('office_id').equals(currentOfficeId).toArray();
+    const activeLegalFiles = legalFiles.filter(f => normalizeLegalFileStatus(f.status) !== 'archived');
+    const filesNeedingAction = activeLegalFiles.filter(f => ['submitting', 'needs_action', 'on_hold'].includes(normalizeLegalFileStatus(f.status)));
     const sessions = await db.sessions.filter(s => s.office_id === currentOfficeId).toArray();
     const todaySessions = sessions.filter(s => String(s.session_date || '').slice(0, 10) === todayKey);
     const weekSessions = sessions.filter(s => { const d = new Date(s.session_date); return d >= new Date(todayKey) && d <= weekEnd; });
@@ -2021,12 +2073,33 @@ window.loadDashboardSummary = async function() {
     const fees = await db.fees.toArray(); const remaining = fees.reduce((sum, f) => sum + Math.max(0, Number(f.remaining ?? Number(f.total || 0) - Number(f.paid || 0))), 0);
     const pending = await db.pendingOperations.count();
     const set = (id, value) => { const el = document.getElementById(id); if (el) el.innerText = value; };
-    set('dashActiveCases', activeCases.length); set('dashTodaySessions', todaySessions.length); set('dashWeekSessions', weekSessions.length); set('dashPostponed', postponed.length); set('dashLateTasks', lateTasks.length); set('dashNoNextSession', withoutNext.length); set('dashRemainingFees', `${remaining.toFixed(2)} ج.م`); set('dashPendingOps', pending);
+    set('dashActiveCases', activeCases.length); set('dashLegalFiles', activeLegalFiles.length); set('dashFilesNeedingAction', filesNeedingAction.length); set('dashTodaySessions', todaySessions.length); set('dashWeekSessions', weekSessions.length); set('dashPostponed', postponed.length); set('dashLateTasks', lateTasks.length); set('dashNoNextSession', withoutNext.length); set('dashRemainingFees', `${remaining.toFixed(2)} ج.م`); set('dashPendingOps', pending);
     const state = document.getElementById('dashboardSyncState'); if (state) { state.innerText = navigator.onLine ? 'متصل' : 'دون اتصال'; state.className = `badge ${navigator.onLine ? 'bg-success' : 'bg-warning text-dark'}`; }
     const latestNotes = await db.notes.filter(n => n.office_id === currentOfficeId).toArray(); latestNotes.sort((a,b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
     const activity = document.getElementById('dashboardRecentActivity'); if (activity) activity.innerText = latestNotes.length ? `آخر ملاحظة فريق: ${latestNotes[0].content || ''}` : 'لا توجد تعديلات أو ملاحظات فريق حديثة.';
 };
 window.addEventListener('online', () => loadDashboardSummary()); window.addEventListener('offline', () => loadDashboardSummary());
+window.refreshOwnerPortal = async function() {
+    if (!currentOfficeId) return;
+    try {
+        const tasks = await db.tasks.toArray();
+        const openTasks = tasks.filter(t => !t.completed && (!t.office_id || t.office_id === currentOfficeId)).sort((a,b) => String(a.date || '').localeCompare(String(b.date || '')));
+        const pendingLocal = await db.pendingOperations.count();
+        const membersHost = document.getElementById('portalMembersList');
+        const tasksHost = document.getElementById('portalTasksList');
+        const noticesHost = document.getElementById('portalNotificationsList');
+        const approvalsHost = document.getElementById('portalApprovalList');
+        const set = (id, value) => { const el = document.getElementById(id); if (el) el.innerText = value; };
+        set('portalOpenTasks', openTasks.length); set('portalNotifications', pendingLocal);
+        if (tasksHost) tasksHost.innerHTML = openTasks.slice(0, 20).map(t => `<div class="portal-list-item"><strong>${escapeHtml(t.description || 'مهمة بدون وصف')}</strong><div class="small text-muted">${escapeHtml(t.date || 'بدون موعد')}</div></div>`).join('') || '<div class="text-muted py-2">لا توجد مهام مفتوحة.</div>';
+        const notes = await db.notes.filter(n => n.office_id === currentOfficeId).toArray(); notes.sort((a,b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
+        if (noticesHost) noticesHost.innerHTML = notes.slice(0, 12).map(n => `<div class="portal-list-item"><strong>ملاحظة فريق</strong><div>${escapeHtml(n.content || '')}</div><div class="small text-muted">${new Date(n.updated_at || n.created_at || Date.now()).toLocaleString('ar-EG')}</div></div>`).join('') || '<div class="text-muted py-2">لا توجد إشعارات محلية.</div>';
+        if (membersHost && supabaseClient) { const { data } = await supabaseClient.from('office_members').select('user_id,display_name,role,active').eq('office_id', currentOfficeId).limit(100); membersHost.innerHTML = (data || []).map(m => `<div class="portal-list-item d-flex justify-content-between"><span><strong>${escapeHtml(m.display_name || 'عضو بدون اسم')}</strong><div class="small text-muted">${escapeHtml(m.role || 'عضو')}</div></span><span class="badge ${m.active === false ? 'bg-secondary' : 'bg-success'}">${m.active === false ? 'معزول' : 'نشط'}</span></div>`).join('') || '<div class="text-muted py-2">لا يوجد أعضاء مسجلون.</div>'; }
+        try { const review = await loadOwnerReviewData(); set('portalApprovalCount', review.requests.length); set('portalConflictCount', review.conflicts.length); if (approvalsHost) approvalsHost.innerHTML = review.requests.slice(0, 8).map(r => `<div class="portal-list-item"><strong>${escapeHtml(reviewEntityLabel(r.entity_type))}</strong><div class="small text-muted">${escapeHtml(r.action)} · ${new Date(r.created_at).toLocaleString('ar-EG')}</div></div>`).join('') || '<div class="text-muted py-2">لا توجد طلبات معلقة.</div>'; } catch { set('portalApprovalCount', '—'); set('portalConflictCount', '—'); if (approvalsHost) approvalsHost.innerHTML = '<div class="text-muted py-2">افتح مركز الاعتماد لتسجيل الدخول وتحديث الطلبات.</div>'; }
+        const dashboardActivity = document.getElementById('dashboardRecentActivity'); if (dashboardActivity) dashboardActivity.innerHTML = notes.slice(0, 8).map(n => `<div class="portal-list-item"><strong>ملاحظة فريق</strong> — ${escapeHtml(n.content || '')}</div>`).join('') || '<div class="text-muted py-2">لا توجد تعديلات حديثة.</div>';
+    } catch (error) { console.warn('تعذر تحديث بوابة المالك:', error); }
+};
+
 
 
 // إثراء شاشة تفاصيل القضية بعد الحفاظ على دوال العرض القديمة.

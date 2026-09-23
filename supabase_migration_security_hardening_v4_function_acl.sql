@@ -1,0 +1,30 @@
+-- Qayd security hardening v4
+-- REVOKE من PUBLIC ضروري لأن anon وauthenticated يرثان صلاحيات PUBLIC.
+revoke execute on function public.get_file_events_for_sync(text) from public, anon;
+grant execute on function public.get_file_events_for_sync(text) to authenticated;
+revoke execute on function public.get_office_files_for_sync(text) from public, anon;
+grant execute on function public.get_office_files_for_sync(text) to authenticated;
+revoke execute on function public.has_office_role(text,text[]) from public, anon;
+grant execute on function public.has_office_role(text,text[]) to authenticated;
+revoke execute on function public.is_office_member(text) from public, anon;
+grant execute on function public.is_office_member(text) to authenticated;
+revoke execute on function public.sync_file_document(jsonb) from public, anon;
+grant execute on function public.sync_file_document(jsonb) to authenticated;
+revoke execute on function public.sync_file_event(jsonb) from public, anon;
+grant execute on function public.sync_file_event(jsonb) to authenticated;
+revoke execute on function public.sync_office_file(jsonb) from public, anon;
+grant execute on function public.sync_office_file(jsonb) to authenticated;
+revoke execute on function public.audit_expense_change() from public, anon, authenticated;
+revoke execute on function public.touch_updated_at() from public, anon, authenticated;
+revoke execute on function public.create_office_for_current_user(text,text,text) from public, anon;
+revoke execute on function public.claim_existing_office_as_owner(text) from public, anon;
+revoke execute on function public.create_owner_recovery_codes(text,integer) from public, anon;
+revoke execute on function public.redeem_owner_recovery_code(text,text) from public, anon;
+revoke execute on function public.set_office_member_role(text,uuid,text) from public, anon;
+revoke execute on function public.revoke_office_member(text,uuid) from public, anon;
+revoke execute on function public.rename_office_member(text,uuid,text) from public, anon;
+revoke execute on function public.register_office_member_device(text,text,text,text,text) from public, anon;
+revoke execute on function public.create_office_invite(text,text,text,integer) from public, anon;
+revoke execute on function public.create_email_invite(text,text,text,text,integer) from public, anon;
+revoke execute on function public.get_case_data(text,text) from public, anon;
+revoke execute on function public.generate_case_code() from public, anon;
