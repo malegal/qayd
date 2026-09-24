@@ -23,6 +23,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
                                 openLocalFile: (filePath) => ipcRenderer.invoke('open-local-file', filePath),
                                 openTemplate: (folderName, templateName) => ipcRenderer.invoke('open-template', folderName, templateName),
                                 openNotes: (folderName) => ipcRenderer.invoke('open-notes', folderName),
+                                // نسخ احتياطي/استعادة محلية كاملة لبيانات المكتب (JSON)
+                                backupDatabase: (jsonContent, defaultName) => ipcRenderer.invoke('backup-database', jsonContent, defaultName),
+                                restoreDatabase: () => ipcRenderer.invoke('restore-database'),
                                 // Supabase keys
                                 getSupabaseKeys: () => ipcRenderer.invoke('get-supabase-keys'),
                                 // وضع التطوير

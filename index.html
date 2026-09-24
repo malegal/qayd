@@ -183,8 +183,40 @@
 @media (max-width:1100px){ .owner-portal-grid,.dashboard-grid{grid-template-columns:repeat(2,minmax(0,1fr));} .portal-columns{grid-template-columns:1fr;} }
 @media (max-width:700px){ .agenda-layout{grid-template-columns:1fr;} .owner-portal-grid,.dashboard-grid{grid-template-columns:1fr;} }
 </style>
+<style>
+/* ===== تحسينات التصميم (المجموعة C) — إضافة فقط دون حذف أي نمط قائم ===== */
+/* C1: مؤشر الاتصال بحالة المزامنة في الشريط الجانبي */
+.sync-conn-dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-left:6px; vertical-align:middle; background:#94a3b8; box-shadow:0 0 0 3px rgba(148,163,184,.18); }
+.sync-conn-dot.online { background:#22c55e; box-shadow:0 0 0 3px rgba(34,197,94,.18); }
+.sync-conn-dot.offline { background:#ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.18); }
+.sync-conn-dot.syncing { background:#eab308; box-shadow:0 0 0 3px rgba(234,179,8,.18); animation:pulseDot 1.1s infinite; }
+@keyframes pulseDot { 0%{opacity:1;} 50%{opacity:.35;} 100%{opacity:1;} }
+
+/* C2: بطاقات إحصائية بأيقونات */
+.dashboard-card { position:relative; }
+.dashboard-card .dc-icon { position:absolute; top:.7rem; left:.7rem; font-size:1.15rem; color:var(--gold-solid); opacity:.85; }
+.dashboard-card.alert strong { color:#b91c1c; }
+
+/* C3: حالات فارغة وتحميل موحّدة */
+.empty-state { text-align:center; padding:2.2rem 1rem; color:var(--text-muted); }
+.empty-state i { font-size:2.4rem; color:var(--gold-solid); opacity:.6; display:block; margin-bottom:.6rem; }
+.loading-overlay { position:fixed; inset:0; background:rgba(15,23,42,.35); backdrop-filter:blur(2px); display:none; align-items:center; justify-content:center; z-index:4000; }
+.loading-overlay.show { display:flex; }
+.loading-spinner { width:54px; height:54px; border:5px solid rgba(255,255,255,.25); border-top-color:var(--gold-solid); border-radius:50%; animation:spin 0.9s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* C4: مركز الإشعارات */
+.notif-btn { position:relative; }
+.notif-count { position:absolute; top:-6px; left:-6px; background:#dc2626; color:#fff; font-size:.68rem; padding:1px 6px; border-radius:10px; font-weight:700; }
+.notif-item { border-bottom:1px solid var(--border); padding:.7rem 0; display:flex; gap:.6rem; align-items:flex-start; }
+.notif-item .ni-icon { font-size:1.15rem; color:var(--gold-solid); }
+.notif-item.warn .ni-icon { color:#dc2626; }
+</style>
 </head>
 <body data-bs-theme="light">
+
+<!-- ========== طبقة التحميل العامة (C3) — إضافة فقط ========== -->
+<div id="globalLoadingOverlay" class="loading-overlay"><div class="loading-spinner"></div></div>
 
 <!-- ========== شاشة تسجيل الدخول ========== -->
 <div id="loginPage">
@@ -230,6 +262,9 @@
         </div>
         <div class="p-3 border-top mt-auto" style="border-color: var(--border-color); position: relative;">
             <span id="syncBadge">0</span>
+            <!-- حالة المزامنة: آخر مزامنة، عدد المعلّق، وحالة الاتصال -->
+            <div id="syncStatusLine" class="text-center small text-white-50 mb-2"><span id="syncConnDot" class="sync-conn-dot"></span> جارٍ فحص حالة المزامنة...</div>
+            <button class="btn btn-sm btn-outline-success w-100 mb-2" onclick="syncWithSupabase()"><i class="bi bi-arrow-repeat"></i> مزامنة الآن</button>
             <!-- حالة الترخيص وزر التفعيل -->
             <div class="text-center small mb-2" id="licenseStatus">
                 <i class="bi bi-key"></i> <span id="licenseStatusText">جاري التحميل...</span>
@@ -252,18 +287,18 @@
             <!-- لوحة التحكم المستقلة -->
             <div class="tab-pane fade show active" id="dashboardTab" role="tabpanel">
                 <div class="page-shell">
-                    <div class="page-heading"><div><h3>لوحة تحكم مكتب جاد الرب</h3><p>رؤية يومية للملفات والجلسات والمهام والمزامنة والطلبات الواردة من الفريق.</p></div><span id="dashboardSyncState" class="badge bg-secondary">جاري الفحص</span></div>
+                    <div class="page-heading"><div><h3>لوحة تحكم مكتب جاد الرب</h3><p>رؤية يومية للملفات والجلسات والمهام والمزامنة والطلبات الواردة من الفريق.</p></div><div class="d-flex align-items-center gap-2"><button class="btn btn-outline-warning notif-btn" onclick="openNotificationsCenter()" title="مركز الإشعارات"><i class="bi bi-bell"></i><span id="notifCount" class="notif-count" style="display:none;">0</span></button><span id="dashboardSyncState" class="badge bg-secondary">جاري الفحص</span></div></div>
                     <div class="dashboard-grid">
-                        <div class="dashboard-card"><small>قضايا نشطة</small><strong id="dashActiveCases">0</strong></div>
-                        <div class="dashboard-card"><small>الملفات الرئيسية</small><strong id="dashLegalFiles">0</strong></div>
-                        <div class="dashboard-card"><small>ملفات تحتاج إجراء</small><strong id="dashFilesNeedingAction">0</strong></div>
-                        <div class="dashboard-card"><small>جلسات اليوم</small><strong id="dashTodaySessions">0</strong></div>
-                        <div class="dashboard-card"><small>جلسات الأسبوع</small><strong id="dashWeekSessions">0</strong></div>
-                        <div class="dashboard-card"><small>جلسات مؤجلة</small><strong id="dashPostponed">0</strong></div>
-                        <div class="dashboard-card"><small>مهام متأخرة</small><strong id="dashLateTasks">0</strong></div>
-                        <div class="dashboard-card"><small>قضايا دون جلسة قادمة</small><strong id="dashNoNextSession">0</strong></div>
-                        <div class="dashboard-card"><small>المتبقي من الأتعاب</small><strong id="dashRemainingFees">0</strong></div>
-                        <div class="dashboard-card"><small>عمليات معلقة</small><strong id="dashPendingOps">0</strong></div>
+                        <div class="dashboard-card"><i class="bi bi-briefcase dc-icon"></i><small>قضايا نشطة</small><strong id="dashActiveCases">0</strong></div>
+                        <div class="dashboard-card"><i class="bi bi-folder2-open dc-icon"></i><small>الملفات الرئيسية</small><strong id="dashLegalFiles">0</strong></div>
+                        <div class="dashboard-card alert"><i class="bi bi-exclamation-triangle dc-icon"></i><small>ملفات تحتاج إجراء</small><strong id="dashFilesNeedingAction">0</strong></div>
+                        <div class="dashboard-card"><i class="bi bi-calendar-check dc-icon"></i><small>جلسات اليوم</small><strong id="dashTodaySessions">0</strong></div>
+                        <div class="dashboard-card"><i class="bi bi-calendar-week dc-icon"></i><small>جلسات الأسبوع</small><strong id="dashWeekSessions">0</strong></div>
+                        <div class="dashboard-card"><i class="bi bi-hourglass-split dc-icon"></i><small>جلسات مؤجلة</small><strong id="dashPostponed">0</strong></div>
+                        <div class="dashboard-card alert"><i class="bi bi-list-check dc-icon"></i><small>مهام متأخرة</small><strong id="dashLateTasks">0</strong></div>
+                        <div class="dashboard-card"><i class="bi bi-calendar-x dc-icon"></i><small>قضايا دون جلسة قادمة</small><strong id="dashNoNextSession">0</strong></div>
+                        <div class="dashboard-card"><i class="bi bi-cash-coin dc-icon"></i><small>المتبقي من الأتعاب</small><strong id="dashRemainingFees">0</strong></div>
+                        <div class="dashboard-card"><i class="bi bi-arrow-repeat dc-icon"></i><small>عمليات معلقة</small><strong id="dashPendingOps">0</strong></div>
                     </div>
                     <div class="portal-columns">
                         <div class="owner-portal-card"><div class="d-flex justify-content-between align-items-center"><h5 class="mb-0">آخر نشاط في المكتب</h5><button class="btn btn-sm btn-outline-primary" onclick="refreshOwnerPortal()">تحديث</button></div><div id="dashboardRecentActivity" class="portal-list mt-2"></div></div>
@@ -416,6 +451,16 @@
                     <div class='col-6 col-md-3'><div class='card-glass text-center'><div class='stats-number' id='stat-sessions'>0</div><div class='text-white-50 small'>جلسات قادمة (أسبوع)</div></div></div>
                     <div class='col-6 col-md-3'><div class='card-glass text-center'><div class='stats-number' id='stat-clients'>0</div><div class='text-white-50 small'>العملاء</div></div></div>
                     <div class='col-6 col-md-3'><div class='card-glass text-center'><div class='stats-number' id='stat-total-s'>0</div><div class='text-white-50 small'>إجمالي الجلسات</div></div></div>
+                </div>
+                <div class="card-glass mb-4">
+                    <h3 class="gold-text mb-2"><i class="bi bi-lightning-charge"></i> البحث الحي الموحّد</h3>
+                    <p class="text-white-50 small mb-2">اكتب أي كلمة (اسم عميل، رقم قضية، كود ملف، محكمة، مهمة، حدث، ملاحظة) لعرض النتائج فوراً من كل الأقسام.</p>
+                    <div class="input-group mx-auto" style="max-width: 720px;">
+                        <span class="input-group-text bg-dark text-warning border-secondary"><i class="bi bi-search"></i></span>
+                        <input id="liveSearchInput" class="form-control form-control-lg" placeholder="ابحث في القضايا والملفات والجلسات والمهام والأحداث والملاحظات..." oninput="runLiveSearch(this.value)">
+                        <button class="btn btn-outline-secondary" onclick="document.getElementById('liveSearchInput').value=''; runLiveSearch('');">مسح</button>
+                    </div>
+                    <div id="liveSearchResults" class="mt-3"></div>
                 </div>
                 <div class="card-glass text-center mb-4">
                     <h3 class="gold-text mb-3">البحث المتقدم</h3>
@@ -635,6 +680,28 @@
 </div>
 
 <!-- مودال الإعدادات (جديد) -->
+<!-- ========== مركز الإشعارات (C4) — إضافة فقط ========== -->
+<div class="modal fade" id="notificationsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title gold-text"><i class="bi bi-bell"></i> مركز الإشعارات</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="text-muted small">ملخّص ما يحتاج انتباهك الآن: عمليات معلقة، تعارضات، مهام متأخرة، وطلبات اعتماد الهاتف.</span>
+                    <button class="btn btn-sm btn-outline-primary" onclick="refreshNotificationsCenter()"><i class="bi bi-arrow-repeat"></i> تحديث</button>
+                </div>
+                <div id="notificationsList"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="settingsModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -651,6 +718,13 @@
                 </button>
                 <button class="btn btn-outline-warning w-100 mb-2" onclick="syncWithSupabase(); hideModal('settingsModal');">
                     <i class="bi bi-arrow-repeat"></i> مزامنة البيانات
+                </button>
+                <!-- نسخ احتياطي/استعادة محلية كاملة (إضافة فقط) -->
+                <button class="btn btn-outline-success w-100 mb-2" onclick="exportBackup(); hideModal('settingsModal');">
+                    <i class="bi bi-download"></i> نسخة احتياطية محلية (تصدير JSON)
+                </button>
+                <button class="btn btn-outline-info w-100 mb-2" onclick="importBackup(); hideModal('settingsModal');">
+                    <i class="bi bi-upload"></i> استعادة من نسخة احتياطية (استيراد JSON)
                 </button>
                 <button class="btn btn-outline-warning w-100 mb-2" id="settingsTeamBtn" onclick="showTeamManagement(); hideModal('settingsModal');">
                     <i class="bi bi-people"></i> إدارة فريق المكتب

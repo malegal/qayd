@@ -106,6 +106,12 @@ db.version(12).stores({
     sessionChangeLog: '++id, office_id, remote_id, session_id, changed_at, action'
 });
 
+// فهرس داخلي لحفظ معرّف Supabase للأحداث المحلية (الأجناد) حتى تتم المزامنة بدون تكرار.
+// إضافة فقط: لا تغيّر الحقول المعروضة ولا طريقة استخدام سطح المكتب.
+db.version(13).stores({
+    events: '++id, office_id, remote_id, title, date, type'
+});
+
 let supabaseClient = null;
 let currentOfficeId = null;
 let currentOfficeName = null;
@@ -1003,7 +1009,7 @@ window.showDayDetails = async function(dateStr) {
         showModal('dayModal');
     } catch (e) { console.error(e); }
 };
-window.toggleTask = async function(id, status) { await db.tasks.update(id, { completed: status }); showDayDetails(currentSelectedDateStr); renderCalendar(); };
+window.toggleTask = async function(id, status) { await db.tasks.update(id, { completed: status }); await queueTaskSync(id, 'update'); showDayDetails(currentSelectedDateStr); renderCalendar(); };
 let editingEventId = null;
 window.openEditEvent = async function(id) {
     const event = await db.events.get(Number(id));
@@ -1021,6 +1027,7 @@ window.saveEditedEvent = async function() {
     const type = document.getElementById('editEventType').value || 'other';
     if (!title || !date) return Swal.fire('تنبيه', 'أدخل وصف الحدث وتاريخه', 'warning');
     await db.events.update(editingEventId, { title, date, type });
+    await queueEventSync(editingEventId, 'update');
     hideModal('editEventModal');
     editingEventId = null;
     await renderCalendar();
@@ -1032,6 +1039,7 @@ window.deleteEvent = async function(id) {
     if (!event) return;
     const result = await Swal.fire({ title: 'حذف الحدث؟', text: event.title || '', icon: 'warning', showCancelButton: true, confirmButtonText: 'حذف', cancelButtonText: 'إلغاء', confirmButtonColor: '#b43b45' });
     if (!result.isConfirmed) return;
+    await queueEventDelete(Number(id));
     await db.events.delete(Number(id));
     if (editingEventId === Number(id)) { hideModal('editEventModal'); editingEventId = null; }
     await renderCalendar();
@@ -1042,7 +1050,11 @@ window.deleteEditingEvent = async function() { if (editingEventId !== null) awai
 window.addNewEvent = async function() {
     const t = document.getElementById('newEventTitle').value, d = document.getElementById('newEventDate').value, type = document.getElementById('newEventType').value;
     if (!t || !d) return;
-    try { if (type === 'task') await db.tasks.add({ description: t, date: d, completed: false }); else await db.events.add({ title: t, date: d, type: 'other' }); document.getElementById('newEventTitle').value = ''; renderCalendar(); } catch (e) { }
+    try {
+        if (type === 'task') { const id = await db.tasks.add({ office_id: currentOfficeId, description: t, date: d, completed: false }); await queueTaskSync(id, 'insert'); }
+        else { const id = await db.events.add({ office_id: currentOfficeId, title: t, date: d, type: 'other', created_at: new Date().toISOString() }); await queueEventSync(id, 'insert'); }
+        document.getElementById('newEventTitle').value = ''; renderCalendar();
+    } catch (e) { }
 };
 window.openAgendaItemModal = function(type = 'event') {
     document.getElementById('agendaItemType').value = type;
@@ -1055,8 +1067,8 @@ window.saveAgendaItemFromModal = async function() {
     const title = document.getElementById('agendaItemTitle').value.trim();
     const date = document.getElementById('agendaItemDate').value;
     if (!title || !date) return Swal.fire('تنبيه', 'أدخل العنوان والتاريخ', 'warning');
-    if (type === 'task') await db.tasks.add({ office_id: currentOfficeId, description: title, date, completed: false });
-    else await db.events.add({ office_id: currentOfficeId, title, date, type: 'other' });
+    if (type === 'task') { const id = await db.tasks.add({ office_id: currentOfficeId, description: title, date, completed: false }); await queueTaskSync(id, 'insert'); }
+    else { const id = await db.events.add({ office_id: currentOfficeId, title, date, type: 'other', created_at: new Date().toISOString() }); await queueEventSync(id, 'insert'); }
     hideModal('agendaItemModal'); await renderCalendar(); await loadUpcomingEvents();
     Swal.fire({ icon: 'success', title: 'تمت الإضافة', timer: 1200, showConfirmButton: false });
 };
@@ -1079,15 +1091,19 @@ window.saveCalculatedModalItem = async function(type) {
     if (!window.modalCalculatedDate) return;
     const result = await Swal.fire({ title: type === 'task' ? 'وصف المهمة' : 'وصف الحدث', input: 'text', inputValue: type === 'task' ? 'مهمة قانونية' : 'موعد قانوني', showCancelButton: true, confirmButtonText: 'حفظ', cancelButtonText: 'إلغاء' });
     if (!result.isConfirmed || !result.value?.trim()) return;
-    if (type === 'task') await db.tasks.add({ office_id: currentOfficeId, description: result.value.trim(), date: window.modalCalculatedDate, completed: false });
-    else await db.events.add({ office_id: currentOfficeId, title: result.value.trim(), date: window.modalCalculatedDate, type: 'legal' });
+    if (type === 'task') { const id = await db.tasks.add({ office_id: currentOfficeId, description: result.value.trim(), date: window.modalCalculatedDate, completed: false }); await queueTaskSync(id, 'insert'); }
+    else { const id = await db.events.add({ office_id: currentOfficeId, title: result.value.trim(), date: window.modalCalculatedDate, type: 'legal', created_at: new Date().toISOString() }); await queueEventSync(id, 'insert'); }
     hideModal('deadlineCalculatorModal'); await renderCalendar(); await loadUpcomingEvents();
     Swal.fire({ icon: 'success', title: 'تمت الإضافة', timer: 1200, showConfirmButton: false });
 };
 window.addQuickItemToDay = async function() {
     const t = document.getElementById('quickItemTitle').value, type = document.getElementById('quickItemType').value;
     if (!t || !currentSelectedDateStr) return;
-    try { if (type === 'task') await db.tasks.add({ description: t, date: currentSelectedDateStr, completed: false }); else await db.events.add({ title: t, date: currentSelectedDateStr, type: 'other' }); document.getElementById('quickItemTitle').value = ''; showDayDetails(currentSelectedDateStr); renderCalendar(); } catch (e) { }
+    try {
+        if (type === 'task') { const id = await db.tasks.add({ office_id: currentOfficeId, description: t, date: currentSelectedDateStr, completed: false }); await queueTaskSync(id, 'insert'); }
+        else { const id = await db.events.add({ office_id: currentOfficeId, title: t, date: currentSelectedDateStr, type: 'other', created_at: new Date().toISOString() }); await queueEventSync(id, 'insert'); }
+        document.getElementById('quickItemTitle').value = ''; showDayDetails(currentSelectedDateStr); renderCalendar();
+    } catch (e) { }
 };
 window.loadUpcomingEvents = async function() {
     try {
@@ -1134,7 +1150,7 @@ window.permanentlyDeleteArchived = async function(id) { const caseData = await d
 
 // ========== 13. الإحصائيات و PDF ==========
 window.loadStats = async function() { try { const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).toArray(); const files = await db.officeFiles.where('office_id').equals(currentOfficeId).filter(f => !f.archived).toArray(); const sessions = await db.sessions.filter(s => s.office_id === currentOfficeId).toArray(); document.getElementById('stat-cases').innerText = cases.length + files.length; document.getElementById('stat-total-s').innerText = sessions.length; document.getElementById('stat-clients').innerText = new Set([...cases, ...files].map(c => c.client_name)).size; } catch (e) { console.error('تعذر تحميل إحصاءات المكتب', e); } };
-window.printCasePDF = async function() { if (!currentCaseForPrint) return; const rows=(currentCaseForPrint.sessions||[]).map(x=>`<li>${new Date(x.session_date).toLocaleString('ar-EG')} — ${escapeHtml(x.case_status||'')} — ${escapeHtml(x.decision||'')}</li>`).join('')||'<li>لا توجد جلسات مسجلة</li>'; const html=`<html dir="rtl"><meta charset="utf-8"><style>body{font-family:Arial,'Noto Sans Arabic',sans-serif;direction:rtl;padding:30px;color:#172b45}h1{text-align:center;color:#12335b}li{margin:10px 0}</style><h1>تقرير القضية</h1><p>العميل: ${escapeHtml(currentCaseForPrint.client_name)}</p><p>رقم القضية: ${escapeHtml(currentCaseForPrint.case_number)}/${escapeHtml(currentCaseForPrint.case_year)}</p><p>المحكمة: ${escapeHtml(currentCaseForPrint.court_name)}</p><p>كود القضية: ${escapeHtml(currentCaseForPrint.case_code||'')}</p><h2>سجل الجلسات</h2><ul>${rows}</ul></html>`; if (ipcRenderer?.printArabicPdf) await ipcRenderer.printArabicPdf(html, `قضية_${currentCaseForPrint.case_number||'تقرير'}.pdf`); };
+window.printCasePDF = async function() { if (!currentCaseForPrint) return; const rows=(currentCaseForPrint.sessions||[]).map(x=>`<li>${new Date(x.session_date).toLocaleString('ar-EG')} — ${escapeHtml(x.case_status||'')} — ${escapeHtml(x.decision||'')}</li>`).join('')||'<li>لا توجد جلسات مسجلة</li>'; const html=`<html dir="rtl"><meta charset="utf-8"><style>body{font-family:Arial,'Noto Sans Arabic',sans-serif;direction:rtl;padding:30px;color:#172b45}.print-head{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #be9124;padding-bottom:10px;margin-bottom:16px}.print-head .office{font-weight:900;color:#12335b;font-size:20px}.print-head .meta{font-size:12px;color:#53657d}h1{text-align:center;color:#12335b}li{margin:10px 0}.print-foot{margin-top:26px;border-top:1px solid #d9e1eb;padding-top:8px;font-size:11px;color:#53657d;text-align:center}</style><div class="print-head"><div class="office">${escapeHtml(currentOfficeName||'مكتب المحاماة')}</div><div class="meta">تاريخ الطباعة: ${new Date().toLocaleString('ar-EG')}</div></div><h1>تقرير القضية</h1><p>العميل: ${escapeHtml(currentCaseForPrint.client_name)}</p><p>رقم القضية: ${escapeHtml(currentCaseForPrint.case_number)}/${escapeHtml(currentCaseForPrint.case_year)}</p><p>المحكمة: ${escapeHtml(currentCaseForPrint.court_name)}</p><p>كود القضية: ${escapeHtml(currentCaseForPrint.case_code||'')}</p><h2>سجل الجلسات</h2><ul>${rows}</ul><div class="print-foot">نظام قيد لإدارة الملفات القانونية</div></html>`; if (ipcRenderer?.printArabicPdf) await ipcRenderer.printArabicPdf(html, `قضية_${currentCaseForPrint.case_number||'تقرير'}.pdf`); };
 
 // ========== 14. المزامنة مع Supabase ==========
 // تسجيل الدخول إلى Supabase من سطح المكتب باستخدام نفس البريد وPIN المحليين.
@@ -1175,6 +1191,82 @@ async function ensureDesktopSupabaseSession() {
 
 function newSyncOperationId() {
     return generateUUID();
+}
+
+// ===== مساعدات مزامنة الأحداث (الأجناد) والمهام =====
+// نولّد معرّفًا ثابتًا (remote_id) لكل سجل محلي حتى لا يتكرر على Supabase.
+async function ensureEventRemoteId(localId) {
+    const event = await db.events.get(Number(localId));
+    if (!event) return null;
+    let remoteId = event.remote_id;
+    if (!remoteId) { remoteId = generateUUID(); await db.events.update(event.id, { remote_id: remoteId }); }
+    return { event, remoteId };
+}
+
+async function queueEventSync(localId, operation = 'insert') {
+    try {
+        const info = await ensureEventRemoteId(localId);
+        if (!info) return;
+        const { event, remoteId } = info;
+        await db.pendingOperations.add({
+            operation: operation === 'insert' ? 'insert_event' : 'update_event',
+            data: { remote_id: remoteId, title: event.title || '', date: event.date || null, type: event.type || 'other', created_at: event.created_at || new Date().toISOString() },
+            timestamp: Date.now()
+        });
+        updatePendingBadge();
+    } catch (e) { console.warn('تعذر جدولة مزامنة الحدث', e); }
+}
+
+async function queueEventDelete(localId) {
+    try {
+        const event = await db.events.get(Number(localId));
+        if (!event || !event.remote_id) return;
+        await db.pendingOperations.add({ operation: 'delete_event', data: { remote_id: event.remote_id }, timestamp: Date.now() });
+        updatePendingBadge();
+    } catch (e) { console.warn('تعذر جدولة حذف الحدث', e); }
+}
+
+async function ensureTaskRemoteId(localId) {
+    const task = await db.tasks.get(Number(localId));
+    if (!task) return null;
+    let remoteId = task.remote_id;
+    if (!remoteId) { remoteId = generateUUID(); await db.tasks.update(task.id, { remote_id: remoteId }); }
+    return { task, remoteId };
+}
+
+async function queueTaskSync(localId, operation = 'insert') {
+    try {
+        const info = await ensureTaskRemoteId(localId);
+        if (!info) return;
+        const { task, remoteId } = info;
+        await db.pendingOperations.add({
+            operation: operation === 'insert' ? 'insert_task' : 'update_task',
+            data: { remote_id: remoteId, description: task.description || '', date: task.date || null, completed: !!task.completed },
+            timestamp: Date.now()
+        });
+        updatePendingBadge();
+    } catch (e) { console.warn('تعذر جدولة مزامنة المهمة', e); }
+}
+
+async function queueTaskDelete(localId) {
+    try {
+        const task = await db.tasks.get(Number(localId));
+        if (!task || !task.remote_id) return;
+        await db.pendingOperations.add({ operation: 'delete_task', data: { remote_id: task.remote_id }, timestamp: Date.now() });
+        updatePendingBadge();
+    } catch (e) { console.warn('تعذر جدولة حذف المهمة', e); }
+}
+
+// رفع حدث إلى Supabase: نحاول أولاً عبر RPC الآمن (بعد تطبيق migration دعم events)،
+// ثم نتراجع إلى الإدراج المباشر إن سمحت سياسات RLS.
+async function pushEventRecord(payload) {
+    try {
+        await pushDesktopRecord('events', payload.id, 'insert', payload);
+        return;
+    } catch (rpcError) {
+        const { error } = await supabaseClient.from('events').upsert(payload, { onConflict: 'id' });
+        if (error) throw rpcError;
+    }
 }
 
 async function pushDesktopRecord(entityType, entityId, operation, payload) {
@@ -1238,6 +1330,17 @@ async function uploadAllLocalOfficeData() {
         const remoteId = record.remote_id || generateUUID();
         if (!record.remote_id) await db.tasks.update(record.id, { remote_id: remoteId });
         await pushDesktopRecord('tasks', remoteId, 'insert', { ...record, id: undefined, remote_id: undefined });
+    }
+
+    // رفع أحداث الأجناد (events) إلى Supabase. لا يدعمها RPC القديم، لذلك نستخدم pushEventRecord
+    // الذي يجرّب المسار الآمن ثم يتراجع للإدراج المباشر. أي فشل هنا لا يوقف بقية المزامنة.
+    const calendarEvents = await db.events.toArray();
+    for (const record of calendarEvents) {
+        const remoteId = record.remote_id || generateUUID();
+        if (!record.remote_id) await db.events.update(record.id, { remote_id: remoteId });
+        const payload = { id: remoteId, office_id: currentOfficeId, title: record.title || '', date: record.date || null, type: record.type || 'other', created_at: record.created_at || new Date().toISOString() };
+        try { await pushEventRecord(payload); }
+        catch (e) { console.warn('تعذر رفع حدث الأجندة (يلزم تطبيق migration دعم events):', e?.message || e); }
     }
 
     const expenses = await db.expenses.where('office_id').equals(currentOfficeId).toArray();
@@ -1357,20 +1460,78 @@ window.syncWithSupabase = async function() {
 };
 
 let backgroundSyncInFlight = false;
+// حالة المزامنة الظاهرة للمالك: آخر نجاح، آخر خطأ، وعدد المحاولات المتتالية الفاشلة.
+let syncState = { lastSyncAt: null, lastError: null, consecutiveFailures: 0, backoffMs: 0 };
+const SYNC_BASE_INTERVAL_MS = 60 * 1000;
+const SYNC_MAX_BACKOFF_MS = 10 * 60 * 1000;
+
+function formatSyncTime(ts) { try { return ts ? new Date(ts).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : '—'; } catch (e) { return '—'; } }
+
+async function updateSyncStatusUI() {
+    const pending = await db.pendingOperations.count().catch(() => 0);
+    const online = navigator.onLine;
+    const state = document.getElementById('dashboardSyncState');
+    if (state) {
+        if (!online) { state.innerText = 'دون اتصال'; state.className = 'badge bg-warning text-dark'; }
+        else if (backgroundSyncInFlight) { state.innerText = 'جارٍ المزامنة...'; state.className = 'badge bg-info text-dark'; }
+        else if (syncState.lastError) { state.innerText = 'تعذّرت المزامنة'; state.className = 'badge bg-danger'; }
+        else if (pending > 0) { state.innerText = `بانتظار الرفع (${pending})`; state.className = 'badge bg-secondary'; }
+        else { state.innerText = 'متزامن'; state.className = 'badge bg-success'; }
+    }
+    const line = document.getElementById('syncStatusLine');
+    if (line) {
+        let text;
+        if (!online) text = 'دون اتصال — ستتم المزامنة تلقائيًا عند العودة';
+        else if (syncState.lastError) text = 'آخر محاولة فشلت — ستُعاد تلقائيًا';
+        else if (pending > 0) text = `آخر مزامنة ${formatSyncTime(syncState.lastSyncAt)} · معلّق ${pending}`;
+        else text = `آخر مزامنة ${formatSyncTime(syncState.lastSyncAt)}`;
+        line.innerText = text;
+    }
+    const badge = document.getElementById('syncBadge');
+    if (badge) { badge.innerText = pending; badge.style.display = pending > 0 ? 'block' : 'none'; }
+    // C1: مؤشر الاتصال الملوّن في الشريط الجانبي (متصل/مزامنة/دون اتصال/خطأ).
+    const dot = document.getElementById('syncConnDot');
+    if (dot) dot.className = 'sync-conn-dot ' + (!online ? 'offline' : backgroundSyncInFlight ? 'syncing' : (syncState.lastError ? 'offline' : 'online'));
+}
+
 async function runBackgroundSync() {
-    if (backgroundSyncInFlight || !currentOfficeId || !navigator.onLine || !supabaseClient) return;
+    if (backgroundSyncInFlight || !currentOfficeId || !navigator.onLine || !supabaseClient) { await updateSyncStatusUI(); return; }
     backgroundSyncInFlight = true;
+    await updateSyncStatusUI();
     try {
         await uploadAllLocalOfficeData();
         await uploadToSupabase();
         await downloadFromSupabase();
-        updatePendingBadge();
+        syncState.lastSyncAt = Date.now();
+        syncState.lastError = null;
+        syncState.consecutiveFailures = 0;
+        syncState.backoffMs = 0;
+        await updatePendingBadge();
         await Promise.all([loadStats(), loadCasesList(), loadUpcomingSessions('week'), renderCalendar()]);
     } catch (error) {
-        console.warn('المزامنة الخلفية مؤجلة:', error?.message || error);
+        syncState.lastError = error?.message || String(error);
+        syncState.consecutiveFailures += 1;
+        // تراجع أسي: 1 ثم 2 ثم 4 ثم 8 ثم 10 دقائق كحد أقصى، لتخفيف الضغط عند تعذّر الاتصال.
+        syncState.backoffMs = Math.min(SYNC_BASE_INTERVAL_MS * Math.pow(2, Math.min(syncState.consecutiveFailures - 1, 4)), SYNC_MAX_BACKOFF_MS);
+        console.warn('المزامنة الخلفية مؤجلة:', syncState.lastError);
     } finally {
         backgroundSyncInFlight = false;
+        await updateSyncStatusUI();
     }
+}
+
+// حلقة مزامنة ذاتية الجدولة تحترم التراجع الأسي بدل الفاصل الثابت.
+function scheduleBackgroundSync() {
+    const delay = syncState.backoffMs > 0 ? syncState.backoffMs : SYNC_BASE_INTERVAL_MS;
+    setTimeout(async () => { await runBackgroundSync(); scheduleBackgroundSync(); }, delay);
+}
+
+// عند عودة الإنترنت: نصفر التراجع ونزامن فورًا.
+async function handleBackOnline() {
+    syncState.backoffMs = 0;
+    syncState.consecutiveFailures = 0;
+    await updateSyncStatusUI();
+    await runBackgroundSync();
 }
 
 async function uploadToSupabase() {
@@ -1384,7 +1545,10 @@ async function uploadToSupabase() {
                 if (error) throw error;
             } else if (op.operation === 'update_case') {
                 const { id, case_code, ...updateData } = op.data;
-                const { error } = await supabaseClient.from('cases').update(updateData).eq('case_code', case_code);
+                // نستخدم المعرّف الفريد للقضية أولاً (مطابقة دقيقة)، مع التراجع إلى case_code للتوافق مع السجلات القديمة.
+                let caseQuery = supabaseClient.from('cases').update(updateData);
+                caseQuery = id ? caseQuery.eq('id', id) : caseQuery.eq('case_code', case_code);
+                const { error } = await caseQuery;
                 if (error) throw error;
             } else if (op.operation === 'delete_case') {
                 const { error: sessionsError } = await supabaseClient.from('sessions').delete().eq('case_id', op.data.id);
@@ -1407,12 +1571,29 @@ async function uploadToSupabase() {
                 if (error) throw error;
             } else if (op.operation === 'insert_payment') {
                 const { id, remote_id, ...paymentData } = op.data;
-                const { error } = await supabaseClient.from('payments').insert([paymentData]);
+                // نستخدم remote_id كمعرّف ثابت على Supabase لمنع تكرار الدفعة عند إعادة المحاولة.
+                const paymentId = remote_id || generateUUID();
+                const { error } = await supabaseClient.from('payments').upsert({ ...paymentData, id: paymentId }, { onConflict: 'id' });
                 if (error) throw error;
             } else if (op.operation === 'insert_expense') {
                 const expenseData = { ...op.data, expense_date: op.data.expense_date || op.data.date };
                 delete expenseData.date; delete expenseData.id; delete expenseData.remote_id; delete expenseData.owner_id;
-                const { error } = await supabaseClient.from('expenses').insert([expenseData]);
+                // remote_id ثابت يمنع تكرار المصروف عند إعادة المحاولة (كان يُدرج مرتين سابقًا).
+                const expenseId = op.data.remote_id || generateUUID();
+                const { error } = await supabaseClient.from('expenses').upsert({ ...expenseData, id: expenseId }, { onConflict: 'id' });
+                if (error) throw error;
+            } else if (op.operation === 'insert_task') {
+                await pushDesktopRecord('tasks', op.data.remote_id, 'insert', { description: op.data.description, date: op.data.date, completed: !!op.data.completed });
+            } else if (op.operation === 'update_task') {
+                await pushDesktopRecord('tasks', op.data.remote_id, 'update', { description: op.data.description, date: op.data.date, completed: !!op.data.completed });
+            } else if (op.operation === 'delete_task') {
+                const { error } = await supabaseClient.from('tasks').delete().eq('id', op.data.remote_id);
+                if (error) throw error;
+            } else if (op.operation === 'insert_event' || op.operation === 'update_event') {
+                const payload = { id: op.data.remote_id, office_id: currentOfficeId, title: op.data.title || '', date: op.data.date || null, type: op.data.type || 'other', created_at: op.data.created_at || new Date().toISOString() };
+                await pushEventRecord(payload);
+            } else if (op.operation === 'delete_event') {
+                const { error } = await supabaseClient.from('events').delete().eq('id', op.data.remote_id);
                 if (error) throw error;
             } else if (op.operation === 'insert_note') {
                 const { id, ...noteData } = op.data;
@@ -1508,6 +1689,16 @@ async function downloadFromSupabase() {
         else { delete local.id; await db.tasks.add(local); }
     }
 
+    // تنزيل أحداث الأجناد (events) حتى تظهر أحداث الهاتف داخل تقويم سطح المكتب.
+    const { data: remoteEvents, error: remoteEventsError } = await supabaseClient.from('events').select('*').eq('office_id', currentOfficeId).limit(5000);
+    if (remoteEventsError) console.error('خطأ في تحميل أحداث الأجندة:', remoteEventsError);
+    for (const ev of remoteEvents || []) {
+        const existing = await db.events.where('remote_id').equals(String(ev.id)).first();
+        const local = { ...ev, remote_id: String(ev.id), id: existing?.id };
+        if (existing) await db.events.update(existing.id, local);
+        else { delete local.id; await db.events.add(local); }
+    }
+
     const { data: remoteExpenses, error: expensesError } = await supabaseClient.from('expenses').select('*').eq('office_id', currentOfficeId).limit(5000);
     if (expensesError) console.error('خطأ في تحميل المصروفات:', expensesError);
     for (const expense of remoteExpenses || []) {
@@ -1596,8 +1787,8 @@ window.openFeesModal = async function(caseId) {
 };
 window.updateTotalFee = async function() { if (!ownerOnly('تعديل الأتعاب')) return; const newTotal = parseFloat(document.getElementById('feeTotalInput').value) || 0; const fee = await db.fees.get(activeCaseId); if (fee) { fee.total = newTotal; fee.remaining = newTotal - fee.paid; await db.fees.put(fee); await db.pendingOperations.add({ operation: 'upsert_fee', data: fee, timestamp: Date.now() }); document.getElementById('feeRemVal').innerText = fee.remaining.toFixed(2); } };
 window.updateFeeNotes = async function() { if (!ownerOnly('تعديل الأتعاب')) return; const fee = await db.fees.get(activeCaseId); if (fee) { fee.notes = document.getElementById('feeGeneralNotes').value; await db.fees.put(fee); await db.pendingOperations.add({ operation: 'upsert_fee', data: fee, timestamp: Date.now() }); } };
-window.addPayment = async function() { if (!ownerOnly('إضافة دفعة')) return; if (!activeCaseId) return; const amount = parseFloat(document.getElementById('payAmount').value); const date = document.getElementById('payDate').value; const note = document.getElementById('payNote').value; if (!amount || amount <= 0 || !date) return Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'أدخل مبلغًا وتاريخًا صحيحين', background: '#0f172a' }); const payment = { case_id: activeCaseId, amount, date, note }; const id = await db.payments.add(payment); await db.pendingOperations.add({ operation: 'insert_payment', data: { ...payment, id }, timestamp: Date.now() }); await db.financialTransactions.put({ id: generateUUID(), office_id: currentOfficeId, transaction_type: 'income', transaction_scope: 'case', case_id: activeCaseId, office_file_id: null, amount, transaction_date: date, category: 'دفعة أتعاب', description: note || '', created_at: new Date().toISOString() }); await openFeesModal(activeCaseId); };
-window.addExpense = async function() { if (!ownerOnly('إضافة مصروف')) return; if (!activeCaseId) return; const amount = parseFloat(document.getElementById('expenseAmount').value); const date = document.getElementById('expenseDate').value; const category = document.getElementById('expenseCategory').value.trim(); if (!amount || amount <= 0 || !date) return Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'أدخل قيمة المصروف وتاريخه', background: '#0f172a' }); const expense = { office_id: currentOfficeId, owner_id: activeCaseId, case_id: activeCaseId, amount, date, category }; const id = await db.expenses.add(expense); await db.pendingOperations.add({ operation: 'insert_expense', data: { ...expense, id }, timestamp: Date.now() }); await db.financialTransactions.put({ id: generateUUID(), office_id: currentOfficeId, transaction_type: 'expense', transaction_scope: 'case', case_id: activeCaseId, office_file_id: null, amount, transaction_date: date, category: category || 'مصروف', description: '', created_at: new Date().toISOString() }); await openFeesModal(activeCaseId); };
+window.addPayment = async function() { if (!ownerOnly('إضافة دفعة')) return; if (!activeCaseId) return; const amount = parseFloat(document.getElementById('payAmount').value); const date = document.getElementById('payDate').value; const note = document.getElementById('payNote').value; if (!amount || amount <= 0 || !date) return Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'أدخل مبلغًا وتاريخًا صحيحين', background: '#0f172a' }); const payment = { case_id: activeCaseId, amount, date, note, remote_id: generateUUID() }; const id = await db.payments.add(payment); await db.pendingOperations.add({ operation: 'insert_payment', data: { ...payment, id }, timestamp: Date.now() }); await db.financialTransactions.put({ id: generateUUID(), office_id: currentOfficeId, transaction_type: 'income', transaction_scope: 'case', case_id: activeCaseId, office_file_id: null, amount, transaction_date: date, category: 'دفعة أتعاب', description: note || '', created_at: new Date().toISOString() }); await openFeesModal(activeCaseId); };
+window.addExpense = async function() { if (!ownerOnly('إضافة مصروف')) return; if (!activeCaseId) return; const amount = parseFloat(document.getElementById('expenseAmount').value); const date = document.getElementById('expenseDate').value; const category = document.getElementById('expenseCategory').value.trim(); if (!amount || amount <= 0 || !date) return Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'أدخل قيمة المصروف وتاريخه', background: '#0f172a' }); const expense = { office_id: currentOfficeId, owner_id: activeCaseId, case_id: activeCaseId, amount, date, category, remote_id: generateUUID() }; const id = await db.expenses.add(expense); await db.pendingOperations.add({ operation: 'insert_expense', data: { ...expense, id }, timestamp: Date.now() }); await db.financialTransactions.put({ id: generateUUID(), office_id: currentOfficeId, transaction_type: 'expense', transaction_scope: 'case', case_id: activeCaseId, office_file_id: null, amount, transaction_date: date, category: category || 'مصروف', description: '', created_at: new Date().toISOString() }); await openFeesModal(activeCaseId); };
 window.openOfficeExpenseModal = function() {
     if (!ownerOnly('تسجيل مصروف المكتب')) return;
     document.getElementById('officeExpenseAmount').value = '';
@@ -1613,7 +1804,7 @@ window.saveOfficeExpense = async function() {
     const category = document.getElementById('officeExpenseCategory').value.trim() || 'مصروف مكتب';
     const description = document.getElementById('officeExpenseDescription').value.trim();
     if (amount <= 0 || !date) return Swal.fire('تنبيه', 'أدخل قيمة وتاريخ المصروف', 'warning');
-    const expense = { office_id: currentOfficeId, owner_id: currentOfficeId, case_id: null, amount, date, category, description };
+    const expense = { office_id: currentOfficeId, owner_id: currentOfficeId, case_id: null, amount, date, category, description, remote_id: generateUUID() };
     const id = await db.expenses.add(expense);
     await db.pendingOperations.add({ operation: 'insert_expense', data: { ...expense, id }, timestamp: Date.now() });
     await db.financialTransactions.put({ id: generateUUID(), office_id: currentOfficeId, transaction_type: 'expense', transaction_scope: 'office', case_id: null, office_file_id: null, amount, transaction_date: date, category, description, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
@@ -1623,7 +1814,7 @@ window.saveOfficeExpense = async function() {
 window.deletePayment = async function(paymentId) { if (!ownerOnly('حذف دفعة')) return; if (confirm('هل أنت متأكد من حذف الدفعة؟')) { await db.payments.delete(paymentId); await openFeesModal(activeCaseId); } };
 window.deleteExpense = async function(expenseId) { if (!ownerOnly('حذف المصروف')) return; if (confirm('هل أنت متأكد من حذف المصروف؟')) { await db.expenses.delete(expenseId); await openFeesModal(activeCaseId); } };
 
-window.printFeesPDF = async function() { if (!activeCaseId) return; const c=await db.cases.get(activeCaseId)||await db.officeFiles.get(activeCaseId); const fee=await db.fees.get(activeCaseId)||{total:0,paid:0,remaining:0}; const payments=await db.payments.where('case_id').equals(activeCaseId).toArray(); const rows=payments.map(x=>`<li>${escapeHtml(x.date)} — ${escapeHtml(x.amount)} ج.م — ${escapeHtml(x.note||'')}</li>`).join('')||'<li>لا توجد دفعات</li>'; const html=`<html dir="rtl"><meta charset="utf-8"><style>body{font-family:Arial,'Noto Sans Arabic',sans-serif;direction:rtl;padding:30px;color:#172b45}h1{text-align:center;color:#12335b}li{margin:10px 0}</style><h1>تقرير الأتعاب</h1><p>العميل: ${escapeHtml(c.client_name)}</p><p>إجمالي الأتعاب: ${escapeHtml(fee.total)} ج.م</p><p>المدفوع: ${escapeHtml(fee.paid)} ج.م</p><p>المتبقي: ${escapeHtml(fee.remaining)} ج.م</p><h2>الدفعات</h2><ul>${rows}</ul></html>`; if (ipcRenderer?.printArabicPdf) await ipcRenderer.printArabicPdf(html, `أتعاب_${c.case_code||c.file_code||'تقرير'}.pdf`); };
+window.printFeesPDF = async function() { if (!activeCaseId) return; const c=await db.cases.get(activeCaseId)||await db.officeFiles.get(activeCaseId); const fee=await db.fees.get(activeCaseId)||{total:0,paid:0,remaining:0}; const payments=await db.payments.where('case_id').equals(activeCaseId).toArray(); const rows=payments.map(x=>`<li>${escapeHtml(x.date)} — ${escapeHtml(x.amount)} ج.م — ${escapeHtml(x.note||'')}</li>`).join('')||'<li>لا توجد دفعات</li>'; const html=`<html dir="rtl"><meta charset="utf-8"><style>body{font-family:Arial,'Noto Sans Arabic',sans-serif;direction:rtl;padding:30px;color:#172b45}.print-head{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #be9124;padding-bottom:10px;margin-bottom:16px}.print-head .office{font-weight:900;color:#12335b;font-size:20px}.print-head .meta{font-size:12px;color:#53657d}h1{text-align:center;color:#12335b}li{margin:10px 0}.print-foot{margin-top:26px;border-top:1px solid #d9e1eb;padding-top:8px;font-size:11px;color:#53657d;text-align:center}</style><div class="print-head"><div class="office">${escapeHtml(currentOfficeName||'مكتب المحاماة')}</div><div class="meta">تاريخ الطباعة: ${new Date().toLocaleString('ar-EG')}</div></div><h1>تقرير الأتعاب</h1><p>العميل: ${escapeHtml(c.client_name)}</p><p>إجمالي الأتعاب: ${escapeHtml(fee.total)} ج.م</p><p>المدفوع: ${escapeHtml(fee.paid)} ج.م</p><p>المتبقي: ${escapeHtml(fee.remaining)} ج.م</p><h2>الدفعات</h2><ul>${rows}</ul><div class="print-foot">نظام قيد لإدارة الملفات القانونية</div></html>`; if (ipcRenderer?.printArabicPdf) await ipcRenderer.printArabicPdf(html, `أتعاب_${c.case_code||c.file_code||'تقرير'}.pdf`); };
 
 // ========== صفحة الأتعاب والمصروفات والمرفقات ==========
 let financeRows = [];
@@ -1673,6 +1864,51 @@ async function loadRecentCases() {
     } catch (e) { console.error(e); }
 }
 window.searchCases = async function() { const q = document.getElementById('searchInput').value.trim().toLowerCase(); if (!q) return; try { const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).filter(c => String(c.client_name || '').toLowerCase().includes(q) || String(c.case_number || '').includes(q) || String(c.client_phone || '').includes(q) || String(c.case_code || '').toLowerCase().includes(q)).toArray(); let html = ''; for (let c of cases) { const sessions = await db.sessions.where('case_id').equals(c.id).toArray(); sessions.sort((a, b) => new Date(b.session_date) - new Date(a.session_date)); const lastStatus = sessions.length > 0 ? sessions[0].case_status : 'جديدة'; html += `<div class="col-md-4"><div class="case-card" onclick="openCaseDetails('${c.id}')"><div class="d-flex justify-content-between align-items-start"><div><h5 class="gold-text mb-1">${c.client_name}</h5><p class="mb-0 text-white-50 small">كود: ${c.case_code}</p></div><span class="case-status status-new">${lastStatus}</span></div><p class="mb-0 text-white-50 mt-2">رقم: ${c.case_number}/${c.case_year}</p></div></div>`; } document.getElementById('searchResults').innerHTML = html || '<div class="col-12 text-center text-muted">لا توجد نتائج</div>'; } catch (e) { } };
+
+// ========== البحث الحي الموحّد (D1) ==========
+// يبحث فوراً في القضايا والملفات القضائية والمهنية والجلسات والمهام والأحداث وملاحظات الفريق.
+// إضافة فقط: لا يغيّر أي منطق قائم، ويعمل بالكامل على الخزين المحلي دون اتصال.
+window.runLiveSearch = async function(rawQuery) {
+    const host = document.getElementById('liveSearchResults');
+    if (!host) return;
+    const q = String(rawQuery || '').trim().toLowerCase();
+    if (!q) { host.innerHTML = '<div class="text-center text-white-50 small py-3">ابدأ الكتابة لعرض النتائج الموحّدة من كل الأقسام.</div>'; return; }
+    const has = (...vals) => vals.some(v => String(v ?? '').toLowerCase().includes(q));
+    const section = (title, icon, items) => {
+        if (!items.length) return '';
+        return `<div class="mb-3"><div class="text-warning fw-bold mb-2"><i class="bi ${icon}"></i> ${title} <span class="badge bg-secondary ms-1">${items.length}</span></div>${items.join('')}</div>`;
+    };
+    const row = (title, subtitle, onclick) => `<div class="border rounded p-2 mb-2 bg-dark bg-opacity-25" style="cursor:pointer;" onclick="${onclick}"><div class="fw-bold gold-text">${escapeHtml(title)}</div><div class="small text-white-50">${escapeHtml(subtitle)}</div></div>`;
+    try {
+        const [cases, sessions, tasks, events, notes, officeFiles, legalFiles] = await Promise.all([
+            db.cases.filter(c => c.office_id === currentOfficeId).toArray(),
+            db.sessions.filter(s => s.office_id === currentOfficeId).toArray(),
+            db.tasks.toArray(),
+            db.events.toArray(),
+            db.notes.filter(n => n.office_id === currentOfficeId).toArray(),
+            db.officeFiles.where('office_id').equals(currentOfficeId).toArray(),
+            db.legalFiles.where('office_id').equals(currentOfficeId).toArray()
+        ]);
+        const caseHits = cases.filter(c => has(c.client_name, c.case_number, c.case_year, c.case_code, c.client_phone, c.court_name, c.case_subject, c.opponent_name));
+        const sessionHits = sessions.filter(s => has(s.case_status, s.decision, s.session_date, s.court_name, s.circuit));
+        const taskHits = tasks.filter(t => (!t.office_id || t.office_id === currentOfficeId) && has(t.description, t.date));
+        const eventHits = events.filter(e => has(e.title, e.date, e.type));
+        const noteHits = notes.filter(n => has(n.content));
+        const officeFileHits = officeFiles.filter(f => has(f.file_code, f.client_name, f.client_phone, f.file_type, f.status));
+        const legalFileHits = legalFiles.filter(f => has(f.file_code, f.client_name, f.status, f.file_type));
+        const html = [
+            section('القضايا القضائية', 'bi-briefcase', caseHits.map(c => row(`${c.client_name || 'قضية'} — ${c.case_code || ''}`, `رقم: ${c.case_number || '-'}/${c.case_year || '-'} · ${c.court_name || ''}`, `showTab('cases'); openCaseDetails('${c.id}')`))),
+            section('الملفات القضائية (النموذج الموحّد)', 'bi-folder2-open', legalFileHits.map(f => row(`${f.client_name || 'ملف'} — ${f.file_code || ''}`, `النوع: ${f.file_type || '-'} · الحالة: ${f.status || '-'}`, `showTab('cases')`))),
+            section('الملفات الإجرائية والخدمية', 'bi-folder-symlink', officeFileHits.map(f => row(`${f.client_name || 'ملف'} — ${f.file_code || ''}`, `النوع: ${f.file_type || '-'} · الحالة: ${f.status || '-'}`, `showTab('cases')`))),
+            section('الجلسات', 'bi-calendar-event', sessionHits.map(s => row(`${new Date(s.session_date).toLocaleDateString('ar-EG')} — ${s.case_status || ''}`, `${s.decision || 'لا يوجد قرار'}`, `showTab('sessions')`))),
+            section('المهام', 'bi-list-check', taskHits.map(t => row(`${t.completed ? '✔ ' : '• '}${t.description || 'مهمة'}`, `التاريخ: ${t.date || '-'}`, `showTab('agenda')`))),
+            section('الأحداث (الأجندة)', 'bi-calendar3', eventHits.map(e => row(`${e.title || 'حدث'}`, `التاريخ: ${e.date || '-'} · ${e.type || ''}`, `showTab('agenda')`))),
+            section('ملاحظات الفريق', 'bi-journal-text', noteHits.map(n => row(`${(n.content || '').slice(0, 80)}`, `آخر تحديث: ${n.updated_at ? new Date(n.updated_at).toLocaleString('ar-EG') : '-'}`, `openTeamNotes()`)))
+        ].join('');
+        host.innerHTML = html || '<div class="text-center text-muted py-3">لا توجد نتائج مطابقة.</div>';
+    } catch (error) { host.innerHTML = `<div class="text-danger small">تعذّر تنفيذ البحث: ${escapeHtml(error?.message || '')}</div>`; }
+};
+
 window.openCaseDetails = async function(id) {
     if (!id) return; try { if (!currentUserRole && currentOfficeId === OWNER_OFFICE_ID) currentUserRole = 'manager'; const c=await db.cases.get(id); if (!c) return; activeCaseId=id;
     document.getElementById('caseDetailContent').innerHTML = `<div class="record-detail"><div class="record-code">كود الملف: ${escapeHtml(c.case_code||'-')}</div><div class="record-row"><strong>رقم القضية:</strong> ${escapeHtml(c.case_number||'-')} / ${escapeHtml(c.case_year||'-')}</div><div class="record-row"><strong>المحكمة والدائرة:</strong> ${escapeHtml(c.court_name||'-')} — ${escapeHtml(c.circuit||'-')}</div><div class="record-row"><strong>نوع القضية:</strong> ${escapeHtml(c.case_type||'-')}</div>${partyCardHtml('بيانات العميل', {name:c.client_name, role:c.client_role, nationalId:c.client_national_id, phone:c.client_phone, address:c.client_address, email:c.client_email})}${partyCardHtml('بيانات الخصم', {name:c.opponent_name, role:c.opponent_role, nationalId:c.opponent_national_id, phone:c.opponent_phone, address:c.opponent_address, email:c.opponent_email})}<div class="record-row"><strong>موضوع القضية:</strong><br>${escapeHtml(c.case_subject||'-')}</div></div>`;
@@ -1849,7 +2085,7 @@ window.addEventListener('keydown', (event) => {
 
 window.saveEditedCase = async function() { if (!ownerOnly('تعديل القضية')) return; const updated = { client_name: document.getElementById('edit_c_name').value, client_phone: document.getElementById('edit_c_phone').value, client_national_id: document.getElementById('edit_c_national_id')?.value || '', client_email: document.getElementById('edit_c_email')?.value || '', client_address: document.getElementById('edit_c_address')?.value || '', opponent_name: document.getElementById('edit_c_opponent').value, opponent_role: document.getElementById('edit_c_opponent_role')?.value || '', opponent_national_id: document.getElementById('edit_c_opponent_national_id')?.value || '', opponent_email: document.getElementById('edit_c_opponent_email')?.value || '', opponent_phone: document.getElementById('edit_c_opponent_phone')?.value || '', opponent_address: document.getElementById('edit_c_opponent_address')?.value || '', case_number: document.getElementById('edit_c_num').value, case_year: document.getElementById('edit_c_year').value, court_name: document.getElementById('edit_c_court').value, circuit: document.getElementById('edit_c_circuit').value, case_type: document.getElementById('edit_case_type').value, case_subject: document.getElementById('edit_c_subject').value, proceeding_type: document.getElementById('edit_case_stage')?.value || 'first_instance', importance: document.getElementById('edit_case_importance')?.value || 'normal', city: document.getElementById('edit_c_city')?.value || '', alert_notes: document.getElementById('edit_c_alert_notes')?.value || '', status: document.getElementById('edit_case_status')?.value || 'جديدة' }; const currentCase = await db.cases.get(activeCaseId); if (!currentCase) throw new Error('القضية غير موجودة'); const caseCode = assertValidCaseCode(currentCase.case_code); await db.cases.update(activeCaseId, updated); await db.pendingOperations.add({ operation: 'update_case', data: { id: activeCaseId, case_code: caseCode, ...updated }, timestamp: Date.now() }); const newParties = collectEditCaseParties(activeCaseId); if (newParties.length) { await db.caseParties.bulkAdd(newParties); for (const party of newParties) await db.pendingOperations.add({ operation: 'upsert_case_party', data: party, timestamp: Date.now() }); } hideModal('editCaseModal'); openCaseDetails(activeCaseId); Swal.fire({ icon: 'success', title: 'تم التعديل محلياً', timer: 1000, showConfirmButton: false, background: '#0f172a' }); updatePendingBadge(); };
 window.calculateDate = function() { const startDate = document.getElementById('calcStartDate').value; if (!startDate) return Swal.fire('تنبيه', 'الرجاء اختيار تاريخ البداية', 'warning'); const days = parseInt(document.getElementById('calcDays').value) || 0; const date = new Date(startDate); date.setDate(date.getDate() + days); const resultStr = date.toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' }); document.getElementById('calcResult').innerText = resultStr; window.calculatedDate = date; };
-window.addCalculatedDateAsEvent = function() { if (!window.calculatedDate) return Swal.fire('تنبيه', 'قم بحساب التاريخ أولاً', 'warning'); const dateStr = window.calculatedDate.toISOString().split('T')[0]; const title = prompt('أدخل وصف الحدث:', 'موعد قانوني'); if (title) { db.events.add({ title, date: dateStr, type: 'legal' }); renderCalendar(); Swal.fire('تم', 'تم إضافة الحدث', 'success'); } };
+window.addCalculatedDateAsEvent = async function() { if (!window.calculatedDate) return Swal.fire('تنبيه', 'قم بحساب التاريخ أولاً', 'warning'); const dateStr = window.calculatedDate.toISOString().split('T')[0]; const title = prompt('أدخل وصف الحدث:', 'موعد قانوني'); if (title) { const id = await db.events.add({ office_id: currentOfficeId, title, date: dateStr, type: 'legal', created_at: new Date().toISOString() }); await queueEventSync(id, 'insert'); renderCalendar(); Swal.fire('تم', 'تم إضافة الحدث', 'success'); } };
 window.addCalculatedDateAsTask = function() { if (!window.calculatedDate) return Swal.fire('تنبيه', 'قم بحساب التاريخ أولاً', 'warning'); const dateStr = window.calculatedDate.toISOString().split('T')[0]; const desc = prompt('أدخل وصف المهمة:', 'مهمة قانونية'); if (desc) { db.tasks.add({ description: desc, date: dateStr, completed: false }); renderCalendar(); Swal.fire('تم', 'تم إضافة المهمة', 'success'); } };
 
 // ========== 18. إعادة تعيين التطبيق ==========
@@ -1876,6 +2112,67 @@ window.resetApp = async function() {
     }
 };
 
+// ========== 18.b النسخ الاحتياطي والاستعادة المحلية (JSON) ==========
+// تصدير كامل لبيانات المكتب من الخزين المحلي (Dexie) + إعدادات المتصفح (localStorage)
+// إلى ملف JSON يختاره المالك. إضافة فقط: لا نحذف أي بيانات عند التصدير.
+window.exportBackup = async function() {
+    try {
+        const backup = { app: 'qayd', kind: 'full-local-backup', version: 1, exported_at: new Date().toISOString(), office_id: currentOfficeId || null, office_name: currentOfficeName || null, tables: {}, settings: {} };
+        for (const table of db.tables) {
+            try { backup.tables[table.name] = await table.toArray(); }
+            catch (e) { backup.tables[table.name] = []; console.warn(`تعذّر تصدير الجدول ${table.name}`, e?.message || e); }
+        }
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key) backup.settings[key] = localStorage.getItem(key);
+        }
+        const jsonContent = JSON.stringify(backup, null, 2);
+        const defaultName = `qayd-backup-${(currentOfficeName || 'office').replace(/[^\w\u0600-\u06FF-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.json`;
+        if (!window.electronAPI?.backupDatabase) return Swal.fire('غير مدعوم', 'ميزة النسخ الاحتياطي متاحة داخل تطبيق سطح المكتب فقط.', 'info');
+        const result = await window.electronAPI.backupDatabase(jsonContent, defaultName);
+        if (result?.success) Swal.fire({ icon: 'success', title: 'تم حفظ النسخة الاحتياطية', html: `تم حفظ الملف في:<br><small class="text-muted">${escapeHtml(result.filePath || '')}</small>`, background: '#0f172a', color: '#fff' });
+        else if (result?.canceled) { /* ألغى المستخدم */ }
+        else Swal.fire('تعذّر الحفظ', result?.error || 'حدث خطأ أثناء حفظ النسخة الاحتياطية', 'error');
+    } catch (error) { Swal.fire('تعذّر التصدير', error?.message || 'فشل إنشاء النسخة الاحتياطية', 'error'); }
+};
+
+// استعادة كاملة من ملف JSON: نستبدل بيانات الجداول المحلية ونعيد الإعدادات.
+// قبل الاستبدال نأخذ نسخة أمان سريعة داخل الذاكرة، ونطلب تأكيداً صريحاً.
+window.importBackup = async function() {
+    try {
+        if (!window.electronAPI?.restoreDatabase) return Swal.fire('غير مدعوم', 'ميزة الاستعادة متاحة داخل تطبيق سطح المكتب فقط.', 'info');
+        const picked = await window.electronAPI.restoreDatabase();
+        if (!picked?.success) { if (!picked?.canceled) Swal.fire('تعذّر القراءة', picked?.error || 'لم يتم اختيار ملف صالح', 'error'); return; }
+        let backup;
+        try { backup = JSON.parse(picked.content); } catch (e) { return Swal.fire('ملف غير صالح', 'تعذّر تحليل محتوى ملف JSON', 'error'); }
+        if (!backup || backup.kind !== 'full-local-backup' || !backup.tables) return Swal.fire('ملف غير معروف', 'هذا الملف ليس نسخة احتياطية صادرة من تطبيق قيد.', 'warning');
+        const tableNames = Object.keys(backup.tables);
+        const totalRows = tableNames.reduce((sum, name) => sum + (Array.isArray(backup.tables[name]) ? backup.tables[name].length : 0), 0);
+        const confirm = await Swal.fire({
+            title: 'تأكيد الاستعادة',
+            html: `سيتم استبدال بيانات هذا الجهاز بمحتوى النسخة الاحتياطية.<br><strong>تاريخ النسخة:</strong> ${backup.exported_at ? new Date(backup.exported_at).toLocaleString('ar-EG') : 'غير معروف'}<br><strong>عدد السجلات:</strong> ${totalRows}<br><span class="text-warning">يُنصح بالاحتفاظ بنسخة احتياطية حالية أولاً.</span>`,
+            icon: 'warning', showCancelButton: true, confirmButtonColor: '#dc3545', confirmButtonText: 'استعادة الآن', cancelButtonText: 'إلغاء', background: '#0f172a', color: '#fff'
+        });
+        if (!confirm.isConfirmed) return;
+        Swal.fire({ title: 'جارٍ الاستعادة...', allowOutsideClick: false, didOpen: () => Swal.showLoading(), background: '#0f172a', color: '#fff' });
+        for (const name of tableNames) {
+            const table = db.table(name);
+            if (!table) continue;
+            const rows = Array.isArray(backup.tables[name]) ? backup.tables[name] : [];
+            await table.clear();
+            if (rows.length) await table.bulkPut(rows);
+        }
+        if (backup.settings && typeof backup.settings === 'object') {
+            for (const [key, value] of Object.entries(backup.settings)) {
+                try { if (value !== null && value !== undefined) localStorage.setItem(key, value); } catch (e) { /* تجاهل مفاتيح غير قابلة للحفظ */ }
+            }
+        }
+        Swal.close();
+        await Swal.fire({ icon: 'success', title: 'تمت الاستعادة', text: 'سيتم إعادة تشغيل التطبيق الآن لتطبيق البيانات المستعادة.', timer: 1800, showConfirmButton: false, background: '#0f172a', color: '#fff' });
+        location.reload();
+    } catch (error) { Swal.close(); Swal.fire('تعذّرت الاستعادة', error?.message || 'فشلت عملية الاستعادة', 'error'); }
+};
+
 // ========== 19. التهيئة النهائية ==========
 document.addEventListener('DOMContentLoaded', async () => {
     const nextWeek = new Date(); nextWeek.setDate(nextWeek.getDate() + 7);
@@ -1890,9 +2187,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!hasOffice) showModal('officeSetupModal');
     if (hasOffice) {
         runBackgroundSync();
-        setInterval(runBackgroundSync, 60 * 1000);
+        scheduleBackgroundSync();
         window.addEventListener('focus', runBackgroundSync);
-        window.addEventListener('online', runBackgroundSync);
+        window.addEventListener('online', handleBackOnline);
     }
 });
 
@@ -1900,6 +2197,44 @@ document.addEventListener('DOMContentLoaded', async () => {
 window.showSettingsModal = function() {
     showModal('settingsModal');
 };
+
+// ========== المجموعة C: أدوات التصميم (حالات التحميل/الفارغ + مركز الإشعارات) ==========
+// C3: طبقة تحميل عامة + مولّد حالة فارغة موحّد، تُستخدم في الصفحات دون تغيير منطقها.
+window.showLoadingOverlay = function() { const el = document.getElementById('globalLoadingOverlay'); if (el) el.classList.add('show'); };
+window.hideLoadingOverlay = function() { const el = document.getElementById('globalLoadingOverlay'); if (el) el.classList.remove('show'); };
+window.emptyStateHtml = function(message, icon) {
+    return `<div class="empty-state"><i class="bi ${icon || 'bi-inbox'}"></i><div>${escapeHtml(message || 'لا توجد بيانات لعرضها.')}</div></div>`;
+};
+
+// C4: مركز الإشعارات — يجمع ما يحتاج انتباه المالك: عمليات معلقة، تعارضات، مهام متأخرة، وطلبات اعتماد الهاتف.
+async function computeNotifications() {
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const items = [];
+    const pending = await db.pendingOperations.count().catch(() => 0);
+    if (pending > 0) items.push({ icon: 'bi-arrow-repeat', cls: '', title: `عمليات في انتظار الرفع: ${pending}`, desc: 'ستُرفع تلقائياً عند توفر الاتصال.' });
+    const lateTasks = await db.tasks.filter(t => !t.completed && t.date && t.date < todayKey && (!t.office_id || t.office_id === currentOfficeId)).toArray().catch(() => []);
+    if (lateTasks.length) items.push({ icon: 'bi-list-check', cls: 'warn', title: `مهام متأخرة: ${lateTasks.length}`, desc: 'افتح الأجندة لمراجعتها.' });
+    const conflicts = await db.syncConflicts.filter(c => c.office_id === currentOfficeId && c.status === 'pending').toArray().catch(() => []);
+    if (conflicts.length) items.push({ icon: 'bi-exclamation-octagon', cls: 'warn', title: `تعارضات مزامنة معلقة: ${conflicts.length}`, desc: 'راجعها من بوابة المالك.' });
+    const requests = await db.approvalRequests.filter(r => r.office_id === currentOfficeId && r.status === 'pending').toArray().catch(() => []);
+    if (requests.length) items.push({ icon: 'bi-shield-check', cls: '', title: `طلبات اعتماد من الهاتف: ${requests.length}`, desc: 'افتح مركز اعتماد الهاتف للمراجعة.' });
+    if (syncState.lastError) items.push({ icon: 'bi-wifi-off', cls: 'warn', title: 'آخر محاولة مزامنة فشلت', desc: 'ستُعاد تلقائياً؛ تحقق من الاتصال.' });
+    if (!items.length) items.push({ icon: 'bi-check-circle', cls: '', title: 'لا توجد إشعارات', desc: 'كل شيء تحت السيطرة.' });
+    return items;
+}
+async function renderNotificationsCenter() {
+    const host = document.getElementById('notificationsList');
+    const countEl = document.getElementById('notifCount');
+    if (!host) return;
+    try {
+        const items = await computeNotifications();
+        const actionable = items.filter(i => !i.title.startsWith('لا توجد')).length;
+        if (countEl) { countEl.innerText = actionable; countEl.style.display = actionable ? 'inline-block' : 'none'; }
+        host.innerHTML = items.map(i => `<div class="notif-item ${i.cls}"><i class="bi ${i.icon} ni-icon"></i><div><div class="fw-bold">${escapeHtml(i.title)}</div><div class="small text-muted">${escapeHtml(i.desc)}</div></div></div>`).join('');
+    } catch (error) { host.innerHTML = `<div class="text-danger small">تعذّر تحميل الإشعارات: ${escapeHtml(error?.message || '')}</div>`; }
+}
+window.openNotificationsCenter = async function() { showModal('notificationsModal'); await renderNotificationsCenter(); };
+window.refreshNotificationsCenter = renderNotificationsCenter;
 
 
 // ========== 18. الملفات المهنية ==========
@@ -2164,7 +2499,9 @@ window.loadDashboardSummary = async function() {
     const pending = await db.pendingOperations.count();
     const set = (id, value) => { const el = document.getElementById(id); if (el) el.innerText = value; };
     set('dashActiveCases', activeCases.length); set('dashLegalFiles', activeLegalFiles.length); set('dashFilesNeedingAction', filesNeedingAction.length); set('dashTodaySessions', todaySessions.length); set('dashWeekSessions', weekSessions.length); set('dashPostponed', postponed.length); set('dashLateTasks', lateTasks.length); set('dashNoNextSession', withoutNext.length); set('dashRemainingFees', `${remaining.toFixed(2)} ج.م`); set('dashPendingOps', pending);
-    const state = document.getElementById('dashboardSyncState'); if (state) { state.innerText = navigator.onLine ? 'متصل' : 'دون اتصال'; state.className = `badge ${navigator.onLine ? 'bg-success' : 'bg-warning text-dark'}`; }
+    await updateSyncStatusUI();
+    // C4: تحديث شارة الإشعارات في لوحة التحكم.
+    if (typeof renderNotificationsCenter === 'function') await renderNotificationsCenter();
     const latestNotes = await db.notes.filter(n => n.office_id === currentOfficeId).toArray(); latestNotes.sort((a,b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
     const activity = document.getElementById('dashboardRecentActivity'); if (activity) activity.innerText = latestNotes.length ? `آخر ملاحظة فريق: ${latestNotes[0].content || ''}` : 'لا توجد تعديلات أو ملاحظات فريق حديثة.';
 };

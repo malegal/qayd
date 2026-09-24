@@ -337,6 +337,36 @@ ipcMain.handle('open-local-file', async (event, filePath) => {
 
 ipcMain.on('show-notification', (event, title, body) => { new Notification({ title, body }).show(); });
 
+// نسخة احتياطية محلية: نطلب من المستخدم اختيار مكان حفظ ملف JSON ثم نكتبه.
+ipcMain.handle('backup-database', async (event, jsonContent, defaultName) => {
+    try {
+        const host = BrowserWindow.fromWebContents(event.sender);
+        const save = await dialog.showSaveDialog(host || undefined, {
+            title: 'حفظ نسخة احتياطية من بيانات المكتب',
+            defaultPath: defaultName || `qayd-backup-${new Date().toISOString().slice(0, 10)}.json`,
+            filters: [{ name: 'ملفات JSON', extensions: ['json'] }]
+        });
+        if (save.canceled || !save.filePath) return { success: false, canceled: true };
+        fs.writeFileSync(save.filePath, jsonContent, 'utf8');
+        return { success: true, filePath: save.filePath };
+    } catch (err) { return { success: false, error: err.message }; }
+});
+
+// استعادة: نختار ملف JSON ونعيد محتواه للواجهة لتستورده في الخزين المحلي.
+ipcMain.handle('restore-database', async (event) => {
+    try {
+        const host = BrowserWindow.fromWebContents(event.sender);
+        const open = await dialog.showOpenDialog(host || undefined, {
+            title: 'اختيار ملف نسخة احتياطية',
+            properties: ['openFile'],
+            filters: [{ name: 'ملفات JSON', extensions: ['json'] }]
+        });
+        if (open.canceled || !open.filePaths?.length) return { success: false, canceled: true };
+        const content = fs.readFileSync(open.filePaths[0], 'utf8');
+        return { success: true, content, filePath: open.filePaths[0] };
+    } catch (err) { return { success: false, error: err.message }; }
+});
+
 ipcMain.handle('get-supabase-keys', () => {
     return { url: SUPABASE_URL, key: SUPABASE_ANON_KEY };
 });
