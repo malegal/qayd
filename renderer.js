@@ -871,7 +871,7 @@ window.searchCasesForSession = async function(q) {
     if (q.length < 2) { document.getElementById('caseSearchResults').style.display = 'none'; return; }
     try {
         const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).filter(c => String(c.client_name).includes(q) || String(c.case_number).includes(q) || String(c.case_code).toLowerCase().includes(q.toLowerCase())).limit(10).toArray();
-        let html = cases.map(c => `<div class="p-2 border-bottom border-secondary text-white" style="cursor:pointer" onclick="selectCaseForSession('${c.id}')"><span class="text-warning">${c.case_code}</span> - ${c.client_name} (${c.case_number})</div>`).join('');
+        let html = cases.map(c => `<div class="p-2 border-bottom border-secondary text-white d-flex justify-content-between align-items-center gap-2" style="cursor:pointer" onclick="selectCaseForSession('${c.id}')"><span><span class="text-warning">${c.case_code}</span> - ${c.client_name} (${c.case_number})</span><button class="btn btn-sm btn-outline-warning open-case-info-btn" onclick="event.stopPropagation(); hideModal('sessionsModal'); showTab('cases'); openCaseDetails('${c.id}')" title="فتح بيانات ومعلومات القضية"><i class="bi bi-folder2-open"></i> فتح بيانات القضية</button></div>`).join('');
         const resDiv = document.getElementById('caseSearchResults');
         resDiv.innerHTML = html; resDiv.style.display = html ? 'block' : 'none';
     } catch (e) { }
@@ -906,7 +906,7 @@ window.saveSession = async function() {
     loadUpcomingSessions('week'); renderCalendar(); updatePendingBadge();
 };
 window.loadUpcomingSessions = async function(range, btn) {
-    if (btn) { document.querySelectorAll('#sessions .btn-group .btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }
+    if (btn) { document.querySelectorAll('#sessionsRangeGroup .btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }
     const now = new Date(); const start = now.toISOString().split('T')[0]; const end = new Date();
     if (range === 'week') end.setDate(now.getDate() + 7); else end.setMonth(now.getMonth() + 1);
     const endStr = end.toISOString().split('T')[0];
@@ -982,7 +982,7 @@ window.renderCalendar = async function() {
         }
         document.getElementById('calendarDays').innerHTML = html;
         const monthList = document.getElementById('agendaMonthCases');
-        if (monthList) { const caseMap = new Map((await db.cases.toArray()).map(c => [String(c.id), c])); const monthRows = sessions.filter(s => s.session_date && s.session_date.startsWith(monthStr)).sort((a,b) => String(a.session_date).localeCompare(String(b.session_date))); monthList.innerHTML = monthRows.length ? monthRows.map(s => { const c = caseMap.get(String(s.case_id)); return `<div class="agenda-month-item" onclick="openCaseDetails('${escapeHtml(s.case_id)}')"><div class="date">${escapeHtml(String(s.session_date).slice(0,16).replace('T',' '))}</div><strong>${escapeHtml(c?.client_name || 'قضية غير معروفة')}</strong><div class="small text-muted">${escapeHtml(c?.case_code || '')} · ${escapeHtml(s.court_name || c?.court_name || 'المحكمة غير محددة')}</div><span class="badge bg-secondary mt-1">${escapeHtml(s.case_status || 'جديدة')}</span></div>`; }).join('') : '<div class="text-muted text-center py-3">لا توجد جلسات أو قضايا مجدولة في هذا الشهر.</div>'; }
+        if (monthList) { const caseMap = new Map((await db.cases.toArray()).map(c => [String(c.id), c])); const monthRows = sessions.filter(s => s.session_date && s.session_date.startsWith(monthStr)).sort((a,b) => String(a.session_date).localeCompare(String(b.session_date))); monthList.innerHTML = monthRows.length ? monthRows.map(s => { const c = caseMap.get(String(s.case_id)); return `<div class="agenda-month-item" onclick="openCaseDetails('${escapeHtml(s.case_id)}')"><div class="date">${escapeHtml(String(s.session_date).slice(0,16).replace('T',' '))}</div><span class="client-name-serif">${escapeHtml(c?.client_name || 'قضية غير معروفة')}</span><div class="small text-muted">${escapeHtml(c?.case_code || '')} · ${escapeHtml(s.court_name || c?.court_name || 'المحكمة غير محددة')}</div><span class="badge bg-secondary mt-1">${escapeHtml(s.case_status || 'جديدة')}</span><button class="btn btn-sm btn-outline-primary open-case-info-btn mt-2 w-100" onclick="event.stopPropagation(); openCaseDetails('${escapeHtml(s.case_id)}')"><i class="bi bi-folder2-open"></i> فتح بيانات ومعلومات القضية</button></div>`; }).join('') : '<div class="text-muted text-center py-3">لا توجد جلسات أو قضايا مجدولة في هذا الشهر.</div>'; }
         loadUpcomingEvents();
     } catch (e) { console.error('خطأ في renderCalendar:', e); }
 };
@@ -1878,7 +1878,7 @@ window.runLiveSearch = async function(rawQuery) {
         if (!items.length) return '';
         return `<div class="mb-3"><div class="text-warning fw-bold mb-2"><i class="bi ${icon}"></i> ${title} <span class="badge bg-secondary ms-1">${items.length}</span></div>${items.join('')}</div>`;
     };
-    const row = (title, subtitle, onclick) => `<div class="border rounded p-2 mb-2 bg-dark bg-opacity-25" style="cursor:pointer;" onclick="${onclick}"><div class="fw-bold gold-text">${escapeHtml(title)}</div><div class="small text-white-50">${escapeHtml(subtitle)}</div></div>`;
+    const row = (title, subtitle, onclick, actionBtn = '') => `<div class="border rounded p-2 mb-2 bg-dark bg-opacity-25" style="cursor:pointer;" onclick="${onclick}"><div class="fw-bold gold-text search-result-name">${escapeHtml(title)}</div><div class="small text-white-50">${escapeHtml(subtitle)}</div>${actionBtn}</div>`;
     try {
         const [cases, sessions, tasks, events, notes, officeFiles, legalFiles] = await Promise.all([
             db.cases.filter(c => c.office_id === currentOfficeId).toArray(),
@@ -1900,7 +1900,7 @@ window.runLiveSearch = async function(rawQuery) {
             section('القضايا القضائية', 'bi-briefcase', caseHits.map(c => row(`${c.client_name || 'قضية'} — ${c.case_code || ''}`, `رقم: ${c.case_number || '-'}/${c.case_year || '-'} · ${c.court_name || ''}`, `showTab('cases'); openCaseDetails('${c.id}')`))),
             section('الملفات القضائية (النموذج الموحّد)', 'bi-folder2-open', legalFileHits.map(f => row(`${f.client_name || 'ملف'} — ${f.file_code || ''}`, `النوع: ${f.file_type || '-'} · الحالة: ${f.status || '-'}`, `showTab('cases')`))),
             section('الملفات الإجرائية والخدمية', 'bi-folder-symlink', officeFileHits.map(f => row(`${f.client_name || 'ملف'} — ${f.file_code || ''}`, `النوع: ${f.file_type || '-'} · الحالة: ${f.status || '-'}`, `showTab('cases')`))),
-            section('الجلسات', 'bi-calendar-event', sessionHits.map(s => row(`${new Date(s.session_date).toLocaleDateString('ar-EG')} — ${s.case_status || ''}`, `${s.decision || 'لا يوجد قرار'}`, `showTab('sessions')`))),
+            section('الجلسات', 'bi-calendar-event', sessionHits.map(s => row(`${new Date(s.session_date).toLocaleDateString('ar-EG')} — ${s.case_status || ''}`, `${s.decision || 'لا يوجد قرار'}`, `showModal('sessionsModal')`))),
             section('المهام', 'bi-list-check', taskHits.map(t => row(`${t.completed ? '✔ ' : '• '}${t.description || 'مهمة'}`, `التاريخ: ${t.date || '-'}`, `showTab('agenda')`))),
             section('الأحداث (الأجندة)', 'bi-calendar3', eventHits.map(e => row(`${e.title || 'حدث'}`, `التاريخ: ${e.date || '-'} · ${e.type || ''}`, `showTab('agenda')`))),
             section('ملاحظات الفريق', 'bi-journal-text', noteHits.map(n => row(`${(n.content || '').slice(0, 80)}`, `آخر تحديث: ${n.updated_at ? new Date(n.updated_at).toLocaleString('ar-EG') : '-'}`, `openTeamNotes()`)))
@@ -2000,8 +2000,10 @@ window.openAdvancedSearchModal = function(mode = 'view') {
 };
 window.openDocumentShortcut = function() { openAdvancedSearchModal('document'); };
 window.openNewSessionShortcut = function() {
-    showTab('sessions');
-    setTimeout(() => document.getElementById('s_search')?.focus(), 150);
+    // تبويب الجلسات أصبح مودالًا يُفتح من أي مكان في التطبيق
+    showModal('sessionsModal');
+    if (typeof loadUpcomingSessions === 'function') loadUpcomingSessions('week');
+    setTimeout(() => document.getElementById('s_search')?.focus(), 300);
 };
 window.clearAdvancedSearch = function() {
     ['advancedQuery', 'advancedStatus', 'advancedFromDate', 'advancedToDate', 'advancedSessionStatus', 'advancedCourtService'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });

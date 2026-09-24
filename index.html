@@ -157,6 +157,9 @@
   #sidebar .sidebar-tabs { overflow-x: visible; width: 100%; }
   #sidebar .sidebar-tabs .nav-link { width: calc(100% - 20px); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
   #sidebar .sidebar-settings-btn { width: 42px; height: 42px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
+  /* أزرار الأيقونات فقط في القائمة الجانبية (المزامنة والإعدادات) لتوفير المساحة */
+  #sidebar .sidebar-icon-btn { width: 42px; height: 42px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 12px; font-size: 1.15rem; }
+  #sidebar .sidebar-icon-btn i { line-height: 1; }
 </style>
 <style>
 /* Owner workspace layout: each operational area is a page, not a crowded dashboard. */
@@ -175,6 +178,14 @@
 .agenda-month-list { max-height:620px; overflow:auto; }
 .agenda-month-item { border-right:4px solid var(--gold); background:#fff; border-radius:10px; padding:.7rem; margin-bottom:.65rem; box-shadow:0 3px 10px rgba(18,51,91,.06); }
 .agenda-month-item .date { color:var(--gold-dark,#8a6814); font-weight:900; }
+/* اسم العميل بخط موحّد (Amiri) في الأجندة ونتائج البحث لإتاحة القراءة المتسقة */
+.agenda-month-item .client-name-serif { font-family:'Amiri', serif; font-size:1.25rem; font-weight:900; color:var(--navy); display:block; margin:.15rem 0; }
+.search-result-name { font-family:'Amiri', serif; font-size:1.2rem; font-weight:900; }
+/* شريط الأزرار السريعة أعلى تقويم الأجندة */
+.agenda-quick-bar { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:.9rem; }
+.agenda-quick-bar .agenda-quick-btn { flex:1 1 auto; min-width:120px; font-weight:800; border-radius:12px; }
+/* زر فتح بيانات ومعلومات القضية */
+.open-case-info-btn { border-radius:10px; font-weight:800; }
 .case-form-section { border:1px solid var(--border); border-radius:12px; padding:1rem; background:#fbfdff; }
 .case-form-section-title { color:var(--navy); font-weight:900; border-bottom:1px solid var(--border); padding-bottom:.5rem; margin-bottom:.8rem; }
 .detail-action-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(135px,1fr)); gap:.5rem; }
@@ -251,12 +262,10 @@
         <div class="nav flex-column nav-pills sidebar-tabs" role="tablist">
             <button class="nav-link active" id="dashboard-tab" data-bs-target="#dashboardTab" type="button" role="tab" onclick="loadDashboardSummary(); refreshOwnerPortal()"><i class="bi bi-speedometer2 fs-5"></i> لوحة التحكم</button>
             <button class="nav-link" id="agenda-tab" data-bs-target="#agendaTab" type="button" role="tab" onclick="renderCalendar()"><i class="bi bi-calendar3 fs-5"></i> الأجندة</button>
-            <button class="nav-link" id="owner-portal-tab" data-bs-target="#ownerPortalTab" type="button" role="tab" onclick="refreshOwnerPortal()"><i class="bi bi-shield-check fs-5"></i> بوابة المالك</button>
             <button class="nav-link" id="cases-tab" data-bs-target="#cases" type="button" role="tab" onclick="loadCasesList()"><i class="bi bi-briefcase fs-5"></i> إدارة القضايا</button>
             <!-- تبويب موحّد للأتعاب والمصروفات؛ كان مكرراً في القائمة الجانبية وتم الإبقاء على رابط واحد فقط. -->
             <button class="nav-link" id="finance-tab" data-bs-target="#financeTab" type="button" role="tab" onclick="loadFinancePage()"><i class="bi bi-cash-stack fs-5"></i> الأتعاب والمصروفات</button>
-            <!-- تتم إضافة القضايا والملفات والتحقيقات من داخل صفحة إدارة الملفات فقط. -->
-            <button class="nav-link" id="sessions-tab" data-bs-target="#sessions" type="button" role="tab"><i class="bi bi-calendar-event fs-5"></i> الجلسات</button>
+            <!-- يتم الوصول إلى تبويب الجلسات الآن من خلال مودال يُفتح من زر "الجلسات" داخل تبويب الأجندة. -->
             <button class="nav-link" id="archive-tab" data-bs-target="#archiveTab" type="button" role="tab" onclick="loadArchivedCases()"><i class="bi bi-archive fs-5"></i> الأرشيف</button>
             <button class="nav-link" id="search-tab" data-bs-target="#searchTab" type="button" role="tab" onclick="loadStats()"><i class="bi bi-search fs-5"></i> بحث وتقارير</button>
         </div>
@@ -264,7 +273,11 @@
             <span id="syncBadge">0</span>
             <!-- حالة المزامنة: آخر مزامنة، عدد المعلّق، وحالة الاتصال -->
             <div id="syncStatusLine" class="text-center small text-white-50 mb-2"><span id="syncConnDot" class="sync-conn-dot"></span> جارٍ فحص حالة المزامنة...</div>
-            <button class="btn btn-sm btn-outline-success w-100 mb-2" onclick="syncWithSupabase()"><i class="bi bi-arrow-repeat"></i> مزامنة الآن</button>
+            <!-- أزرار الأيقونات فقط (المزامنة والإعدادات) لتوفير المساحة -->
+            <div class="d-flex justify-content-center align-items-center gap-2 mb-2">
+                <button class="btn btn-sm btn-outline-success sidebar-icon-btn" onclick="syncWithSupabase()" title="مزامنة الآن" aria-label="مزامنة الآن"><i class="bi bi-arrow-repeat"></i></button>
+                <button class="btn btn-outline-secondary sidebar-icon-btn" onclick="showSettingsModal()" title="الإعدادات" aria-label="الإعدادات"><i class="bi bi-gear"></i></button>
+            </div>
             <!-- حالة الترخيص وزر التفعيل -->
             <div class="text-center small mb-2" id="licenseStatus">
                 <i class="bi bi-key"></i> <span id="licenseStatusText">جاري التحميل...</span>
@@ -273,11 +286,7 @@
                 <i class="bi bi-unlock"></i> تفعيل الترخيص
             </button>
             <button class="btn btn-outline-warning w-100 mb-2" id="teamManagementBtn" style="display:none" onclick="showTeamManagement()"><i class="bi bi-people"></i> إدارة الفريق</button>
-            <button class="btn btn-outline-info w-100 mb-2" id="ownerReviewBtn" style="display:none" onclick="openOwnerReviewCenter()"><i class="bi bi-shield-check"></i> اعتماد الهاتف <span id="ownerReviewBadge" class="badge bg-danger ms-1">0</span></button>
-            <!-- زر الإعدادات -->
-            <button class="btn btn-outline-secondary w-100" onclick="showSettingsModal()">
-                <i class="bi bi-gear"></i> الإعدادات
-            </button>
+            <!-- تمت إزالة زر "اعتماد الهاتف" من القائمة الجانبية لأنه متاح الآن داخل لوحة التحكم/بوابة المالك (مركز الاعتماد). -->
         </div>
     </div>
 
@@ -304,6 +313,12 @@
                         <div class="owner-portal-card"><div class="d-flex justify-content-between align-items-center"><h5 class="mb-0">آخر نشاط في المكتب</h5><button class="btn btn-sm btn-outline-primary" onclick="refreshOwnerPortal()">تحديث</button></div><div id="dashboardRecentActivity" class="portal-list mt-2"></div></div>
                         <div class="owner-portal-card"><h5>اختصارات المالك</h5><div class="d-grid gap-2"><button class="btn btn-outline-primary" onclick="showTab('cases'); openAddCaseModal()"><i class="bi bi-plus-lg"></i> قضية جديدة</button><button class="btn btn-outline-success" onclick="openNewSessionShortcut()"><i class="bi bi-calendar-plus"></i> جلسة جديدة</button><button class="btn btn-outline-warning" onclick="showTab('agenda'); openAgendaItemModal('task')"><i class="bi bi-list-check"></i> حدث أو مهمة</button><button class="btn btn-outline-info" onclick="openTeamNotes()"><i class="bi bi-journal-text"></i> ملاحظات الفريق</button><button class="btn btn-outline-secondary" onclick="loadFinancePage()"><i class="bi bi-cash-stack"></i> الأتعاب والمصروفات</button><button class="btn btn-outline-info" onclick="openOwnerReviewCenter()"><i class="bi bi-shield-check"></i> مراجعة طلبات الهاتف</button></div></div>
                     </div>
+
+                    <!-- ===== قسم بوابة المالك (مدموج داخل لوحة التحكم) ===== -->
+                    <div class="page-heading mt-3"><div><h4 class="mb-0">بوابة مالك المكتب</h4><p>إدارة أعضاء المكتب، الطلبات الواردة، التعارضات، المهام والإشعارات من مكان واحد.</p></div><button class="btn btn-outline-warning" onclick="refreshOwnerPortal()"><i class="bi bi-arrow-repeat"></i> تحديث البوابة</button></div>
+                    <div class="owner-portal-grid"><div class="owner-portal-card"><small>طلبات الهاتف</small><strong id="portalApprovalCount">0</strong></div><div class="owner-portal-card"><small>تعارضات المزامنة</small><strong id="portalConflictCount">0</strong></div><div class="owner-portal-card"><small>مهام مفتوحة</small><strong id="portalOpenTasks">0</strong></div><div class="owner-portal-card"><small>إشعارات محلية</small><strong id="portalNotifications">0</strong></div></div>
+                    <div class="portal-columns"><div class="owner-portal-card"><div class="d-flex justify-content-between align-items-center"><h5>إدارة أعضاء المكتب</h5><button class="btn btn-sm btn-outline-warning" onclick="showTeamManagement()"><i class="bi bi-person-plus"></i> دعوة أو عزل عضو</button></div><div id="portalMembersList" class="portal-list"></div></div><div class="owner-portal-card"><div class="d-flex justify-content-between align-items-center"><h5>طلبات الهاتف والتعارضات</h5><button class="btn btn-sm btn-outline-info" onclick="openOwnerReviewCenter()">فتح المركز</button></div><div id="portalApprovalList" class="portal-list"></div></div></div>
+                    <div class="portal-columns"><div class="owner-portal-card"><h5>المهام المفتوحة والمتأخرة</h5><div id="portalTasksList" class="portal-list"></div></div><div class="owner-portal-card"><h5>الإشعارات والنشاط الأخير</h5><div id="portalNotificationsList" class="portal-list"></div></div></div>
                 </div>
             </div>
 
@@ -311,6 +326,13 @@
             <div class="tab-pane fade" id="agendaTab" role="tabpanel">
                 <div class="agenda-layout agenda-container">
                     <div class="calendar-section">
+                        <!-- شريط الأزرار السريعة أعلى التقويم: جلسة / مهمة / حدث / حاسبة المواعيد -->
+                        <div class="agenda-quick-bar">
+                            <button class="btn btn-success agenda-quick-btn" onclick="openNewSessionShortcut()"><i class="bi bi-calendar-plus"></i> (+ جلسة)</button>
+                            <button class="btn btn-outline-warning agenda-quick-btn" onclick="openAgendaItemModal('task')"><i class="bi bi-list-check"></i> (+ مهمة)</button>
+                            <button class="btn btn-outline-info agenda-quick-btn" onclick="openAgendaItemModal('event')"><i class="bi bi-calendar-event"></i> (+ حدث)</button>
+                            <button class="btn btn-outline-primary agenda-quick-btn" onclick="openDeadlineCalculatorModal()"><i class="bi bi-calculator"></i> حاسبة المواعيد</button>
+                        </div>
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <button class="btn btn-outline-warning btn-sm" onclick="changeMonth(-1)">السابق</button>
                             <h3 class="gold-text m-0" id="calendarMonthYear"></h3>
@@ -321,9 +343,9 @@
                     </div>
                     <div class="events-section">
                         <div class="owner-portal-card mb-3"><h4 class="gold-text mb-3">جلسات وملفات الشهر</h4><div id="agendaMonthCases" class="agenda-month-list"></div></div>
-                        <div class="owner-portal-card"><h4 class="gold-text mb-3">أدوات الأجندة</h4>
-                        <div class="d-grid gap-2"><button class="btn btn-success" onclick="openAgendaItemModal('event')"><i class="bi bi-calendar-event"></i> إضافة حدث</button><button class="btn btn-outline-warning" onclick="openAgendaItemModal('task')"><i class="bi bi-list-check"></i> إضافة مهمة</button><button class="btn btn-outline-info" onclick="openDeadlineCalculatorModal()"><i class="bi bi-calculator"></i> حاسبة المواعيد</button></div>
-                        <hr><h5 class="gold-text">الأحداث والمهام القريبة</h5>
+                        <!-- تمت إزالة أزرار "أدوات الأجندة" الثلاثة لأنها أصبحت متاحة في الشريط أعلى التقويم. -->
+                        <div class="owner-portal-card">
+                        <h5 class="gold-text">الأحداث والمهام القريبة</h5>
                         <div id="upcomingEventsList" style="max-height:250px; overflow-y:auto;"></div>
                     </div>
                 </div>
@@ -332,7 +354,7 @@
 
             <!-- صفحة الأتعاب والمصروفات -->
             <div class="tab-pane fade" id="financeTab" role="tabpanel">
-                <div class="page-heading"><div><h3>الدفتر المالي الموحد</h3><p>حساب مستقل للمكتب، ولكل قضية أو ملف، مع عرض المتحصلات والمصروفات وصافي الحساب.</p></div><div class="d-flex gap-2"><button class="gold-btn" onclick="openOfficeExpenseModal()"><i class="bi bi-wallet2"></i> تسجيل مصروف مكتب</button><button class="btn btn-outline-primary" onclick="showTab('cases'); openNewSessionShortcut()"><i class="bi bi-calendar-plus"></i> جلسة جديدة</button></div></div>
+                <div class="page-heading"><div><h3>الدفتر المالي الموحد</h3><p>حساب مستقل للمكتب، ولكل قضية أو ملف، مع عرض المتحصلات والمصروفات وصافي الحساب.</p></div><div class="d-flex gap-2"><button class="gold-btn" onclick="openOfficeExpenseModal()"><i class="bi bi-wallet2"></i> تسجيل مصروف مكتب</button><button class="btn btn-outline-primary" onclick="openNewSessionShortcut()"><i class="bi bi-calendar-plus"></i> جلسة جديدة</button></div></div>
                 <div class="finance-summary-grid mb-4"><div class="finance-summary-card"><span>إجمالي العمليات</span><strong id="financePageFees">0.00</strong></div><div class="finance-summary-card success"><span>إجمالي المتحصلات</span><strong id="financePageCollected">0.00</strong></div><div class="finance-summary-card danger"><span>إجمالي المصروفات</span><strong id="financePageExpenses">0.00</strong></div><div class="finance-summary-card primary"><span>صافي الحساب</span><strong id="financePageProfit">0.00</strong></div></div>
                 <div class="finance-toolbar"><input id="financeSearchInput" class="form-control" placeholder="بحث بالاسم أو رقم القضية أو كود الملف..." oninput="filterFinancePage()"><select id="financeTypeFilter" class="form-select" onchange="filterFinancePage()"><option value="">كل الملفات</option><option value="judicial">قضايا قضائية</option><option value="professional">ملفات إجرائية وخدمية</option><option value="office">حساب المكتب</option></select><button class="navy-btn" onclick="loadFinancePage()"><i class="bi bi-arrow-repeat"></i> تحديث</button></div>
                 <div class="table-responsive"><table class="table finance-table align-middle"><thead><tr><th>العميل</th><th>الملف</th><th>المحكمة/الخدمة</th><th>الأتعاب</th><th>المتحصل</th><th>المصروفات</th><th>صافي الربح</th><th>إجراء</th></tr></thead><tbody id="financeTableBody"></tbody></table></div>
@@ -395,48 +417,6 @@
             </div>
 
 
-            <!-- بوابة المالك -->
-            <div class="tab-pane fade" id="ownerPortalTab" role="tabpanel">
-                <div class="page-shell"><div class="page-heading"><div><h3>بوابة مالك المكتب</h3><p>إدارة أعضاء المكتب، الطلبات الواردة، التعارضات، المهام والإشعارات من مكان واحد.</p></div><button class="gold-btn" onclick="refreshOwnerPortal()"><i class="bi bi-arrow-repeat"></i> تحديث البوابة</button></div>
-                    <div class="owner-portal-grid"><div class="owner-portal-card"><small>طلبات الهاتف</small><strong id="portalApprovalCount">0</strong></div><div class="owner-portal-card"><small>تعارضات المزامنة</small><strong id="portalConflictCount">0</strong></div><div class="owner-portal-card"><small>مهام مفتوحة</small><strong id="portalOpenTasks">0</strong></div><div class="owner-portal-card"><small>إشعارات محلية</small><strong id="portalNotifications">0</strong></div></div>
-                    <div class="portal-columns"><div class="owner-portal-card"><div class="d-flex justify-content-between align-items-center"><h5>إدارة أعضاء المكتب</h5><button class="btn btn-sm btn-outline-warning" onclick="showTeamManagement()"><i class="bi bi-person-plus"></i> دعوة أو عزل عضو</button></div><div id="portalMembersList" class="portal-list"></div></div><div class="owner-portal-card"><div class="d-flex justify-content-between align-items-center"><h5>طلبات الهاتف والتعارضات</h5><button class="btn btn-sm btn-outline-info" onclick="openOwnerReviewCenter()">فتح المركز</button></div><div id="portalApprovalList" class="portal-list"></div></div></div>
-                    <div class="portal-columns"><div class="owner-portal-card"><h5>المهام المفتوحة والمتأخرة</h5><div id="portalTasksList" class="portal-list"></div></div><div class="owner-portal-card"><h5>الإشعارات والنشاط الأخير</h5><div id="portalNotificationsList" class="portal-list"></div></div></div>
-                </div>
-            </div>
-
-            <!-- تبويب الجلسات -->
-            <div class="tab-pane fade" id="sessions" role="tabpanel">
-                <h3 class="gold-text mb-4">إضافة جلسة ومتابعة</h3>
-                <div class="row g-4">
-                    <div class="col-lg-5">
-                        <div class="card-glass">
-                            <h5 class="gold-text mb-4">تسجيل جلسة جديدة</h5>
-                            <div class="mb-3">
-                                <label>ابحث عن القضية</label>
-                                <input id="s_search" class="form-control" placeholder="اسم العميل، الرقم..." onkeyup="searchCasesForSession(this.value)">
-                                <div id="caseSearchResults" class="mt-2 bg-dark border border-secondary" style="max-height:200px; overflow-y:auto; display:none; position:absolute; width:90%; z-index:100;"></div>
-                            </div>
-                            <div class="mb-3"><label>كود القضية المختار</label><input id="s_case_code" class="form-control text-warning fw-bold" readonly placeholder="لم يتم الاختيار"></div>
-                            <div class="row g-2 mb-3"><div class="col-md-6"><label>رقم القضية</label><input id="s_case_number" class="form-control" readonly></div><div class="col-md-6"><label>سنة القضية</label><input id="s_case_year" class="form-control" readonly></div></div>
-                            <div class="row g-2 mb-3"><div class="col-md-5"><label>المحكمة</label><input id="s_court" class="form-control"></div><div class="col-md-4"><label>الدائرة</label><input id="s_circuit" class="form-control"></div><div class="col-md-3"><label>المدينة</label><input id="s_city" class="form-control"></div></div>
-                            <div class="mb-3"><label>اسم العميل</label><input id="s_client" class="form-control" readonly></div>
-                            <div class="mb-3"><label>صفة العميل</label><input id="s_client_role" class="form-control" readonly></div>
-                            <div class="mb-3"><label>اسم الخصم</label><input id="s_opponent" class="form-control text-danger" readonly></div>
-                            <div class="mb-3"><label>تاريخ ووقت الجلسة</label><input type="datetime-local" id="s_date" class="form-control"></div>
-                            <div class="mb-3"><label>حالة الجلسة</label><select id="s_case_status" class="form-select"><option>جديدة</option><option>مؤجلة</option><option>مشطوبة</option><option>موقوفة</option><option>محجوزة للحكم</option><option>محكوم فيها</option></select></div>
-                            <div class="mb-3"><label>القرار / ما تم في الجلسة</label><textarea id="s_decision" class="form-control" rows="2"></textarea></div><div class="row g-2 mb-4"><div class="col-md-6"><label>المطلوب بعد الجلسة</label><textarea id="s_required_action" class="form-control" rows="2"></textarea></div><div class="col-md-3"><label>المسؤول</label><input id="s_responsible" class="form-control"></div><div class="col-md-3"><label>المتابعة القادمة</label><input type="date" id="s_followup" class="form-control"></div></div>
-                            <button class="gold-btn w-100" onclick="saveSession()">حفظ الجلسة</button>
-                        </div>
-                    </div>
-                    <div class="col-lg-7">
-                        <div class="card-glass">
-                            <h5 class="gold-text mb-4">جلسات قادمة</h5>
-                            <div class="btn-group w-100 mb-3"><button type="button" class="btn btn-outline-secondary active" onclick="loadUpcomingSessions('week', this)">الأسبوع الحالي</button><button type="button" class="btn btn-outline-secondary" onclick="loadUpcomingSessions('month', this)">الشهر الحالي</button></div>
-                            <div id="upcomingSessionsList" style="max-height: 500px; overflow-y:auto;"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
             <!-- تبويب الأرشيف -->
             <div class="tab-pane fade" id="archiveTab" role="tabpanel">
@@ -815,5 +795,38 @@ label, .form-label { color:var(--text) !important; font-weight:700; }
 <div class="modal fade" id="agendaItemModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title gold-text"><i class="bi bi-calendar-plus"></i> إضافة عنصر للأجندة</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><label>النوع</label><select id="agendaItemType" class="form-select mb-3"><option value="event">حدث</option><option value="task">مهمة</option></select><label>العنوان</label><input id="agendaItemTitle" class="form-control mb-3" placeholder="مثال: مراجعة مستندات أو موعد إعلان"><label>التاريخ</label><input id="agendaItemDate" type="date" class="form-control"></div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button><button class="gold-btn" onclick="saveAgendaItemFromModal()">حفظ</button></div></div></div></div>
 <div class="modal fade" id="deadlineCalculatorModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title gold-text"><i class="bi bi-calculator"></i> حاسبة المواعيد</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><label>تاريخ البداية</label><input id="modalCalcStartDate" type="date" class="form-control mb-3"><label>عدد الأيام</label><input id="modalCalcDays" type="number" class="form-control mb-3" value="15" min="0"><button class="btn btn-outline-info w-100" onclick="calculateModalDate()">احسب الموعد</button><div id="modalCalcResult" class="result-date"></div></div><div class="modal-footer"><button class="btn btn-outline-success" onclick="saveCalculatedModalItem('event')">حفظ كحدث</button><button class="btn btn-outline-warning" onclick="saveCalculatedModalItem('task')">حفظ كمهمة</button></div></div></div></div>
 <div class="modal fade" id="officeExpenseModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title gold-text"><i class="bi bi-wallet2"></i> تسجيل مصروف المكتب</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><label>القيمة</label><input id="officeExpenseAmount" type="number" min="0" class="form-control mb-3"><label>التاريخ</label><input id="officeExpenseDate" type="date" class="form-control mb-3"><label>البند</label><input id="officeExpenseCategory" class="form-control mb-3" placeholder="إيجار، انتقالات، أدوات مكتبية..."><label>بيان إضافي</label><textarea id="officeExpenseDescription" class="form-control" rows="2"></textarea></div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button><button class="gold-btn" onclick="saveOfficeExpense()">حفظ المصروف</button></div></div></div></div>
+<!-- مودال الجلسات (نُقل من تبويب الجلسات) — يحتوي على كل الحقول دون حذف أي منها -->
+<div class="modal fade" id="sessionsModal" tabindex="-1"><div class="modal-dialog modal-xl"><div class="modal-content"><div class="modal-header"><h5 class="modal-title gold-text"><i class="bi bi-calendar-event"></i> الجلسات — إضافة جلسة ومتابعة</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body">
+    <div class="row g-4">
+        <div class="col-lg-5">
+            <div class="card-glass">
+                <h5 class="gold-text mb-4">تسجيل جلسة جديدة</h5>
+                <div class="mb-3 position-relative">
+                    <label>ابحث عن القضية</label>
+                    <input id="s_search" class="form-control" placeholder="اسم العميل، الرقم..." onkeyup="searchCasesForSession(this.value)">
+                    <div id="caseSearchResults" class="mt-2 bg-dark border border-secondary" style="max-height:200px; overflow-y:auto; display:none; position:absolute; width:90%; z-index:100;"></div>
+                </div>
+                <div class="mb-3"><label>كود القضية المختار</label><input id="s_case_code" class="form-control text-warning fw-bold" readonly placeholder="لم يتم الاختيار"></div>
+                <div class="row g-2 mb-3"><div class="col-md-6"><label>رقم القضية</label><input id="s_case_number" class="form-control" readonly></div><div class="col-md-6"><label>سنة القضية</label><input id="s_case_year" class="form-control" readonly></div></div>
+                <div class="row g-2 mb-3"><div class="col-md-5"><label>المحكمة</label><input id="s_court" class="form-control"></div><div class="col-md-4"><label>الدائرة</label><input id="s_circuit" class="form-control"></div><div class="col-md-3"><label>المدينة</label><input id="s_city" class="form-control"></div></div>
+                <div class="mb-3"><label>اسم العميل</label><input id="s_client" class="form-control" readonly></div>
+                <div class="mb-3"><label>صفة العميل</label><input id="s_client_role" class="form-control" readonly></div>
+                <div class="mb-3"><label>اسم الخصم</label><input id="s_opponent" class="form-control text-danger" readonly></div>
+                <div class="mb-3"><label>تاريخ ووقت الجلسة</label><input type="datetime-local" id="s_date" class="form-control"></div>
+                <div class="mb-3"><label>حالة الجلسة</label><select id="s_case_status" class="form-select"><option>جديدة</option><option>مؤجلة</option><option>مشطوبة</option><option>موقوفة</option><option>محجوزة للحكم</option><option>محكوم فيها</option></select></div>
+                <div class="mb-3"><label>القرار / ما تم في الجلسة</label><textarea id="s_decision" class="form-control" rows="2"></textarea></div>
+                <div class="row g-2 mb-4"><div class="col-md-6"><label>المطلوب بعد الجلسة</label><textarea id="s_required_action" class="form-control" rows="2"></textarea></div><div class="col-md-3"><label>المسؤول</label><input id="s_responsible" class="form-control"></div><div class="col-md-3"><label>المتابعة القادمة</label><input type="date" id="s_followup" class="form-control"></div></div>
+                <button class="gold-btn w-100" onclick="saveSession()">حفظ الجلسة</button>
+            </div>
+        </div>
+        <div class="col-lg-7">
+            <div class="card-glass">
+                <h5 class="gold-text mb-4">جلسات قادمة</h5>
+                <div class="btn-group w-100 mb-3" id="sessionsRangeGroup"><button type="button" class="btn btn-outline-secondary active" onclick="loadUpcomingSessions('week', this)">الأسبوع الحالي</button><button type="button" class="btn btn-outline-secondary" onclick="loadUpcomingSessions('month', this)">الشهر الحالي</button></div>
+                <div id="upcomingSessionsList" style="max-height: 500px; overflow-y:auto;"></div>
+            </div>
+        </div>
+    </div>
+</div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button></div></div></div></div>
 </body>
 </html>
