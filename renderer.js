@@ -220,10 +220,10 @@ async function updatePendingBadge() {
 }
 
 function updateSidebarOfficeName(name) {
-    // ترويسة القائمة الجانبية أصبحت ثابتة: "مكتب جاد الرب للمحاماة" ثم "محمود عبد الحميد".
+    // ترويسة القائمة الجانبية أصبحت ثابتة: "مكتب جاد الرب للمحاماة" ثم "محمود عبد الحميد المحامي".
     // نُبقي الدالة آمنة (no-op) للحفاظ على النص الثابت وعدم كسر الاستدعاءات القائمة.
     const el = document.getElementById('sidebarOfficeName');
-    if (el) el.innerText = name || 'محمود عبد الحميد';
+    if (el) el.innerText = name || 'محمود عبد الحميد المحامي';
 }
 
 // ========== 2. دوال الترخيص والعرض ==========
@@ -386,6 +386,8 @@ function showTab(tabId) {
         const target = btn.getAttribute('data-bs-target');
         if (target === '#' + tabId) btn.classList.add('active');
     });
+    // تحديث قائمة "جلسات الشهر" عند فتح تبويب الأجندة.
+    if (tabId === 'agendaTab' && typeof renderCalendar === 'function') { try { renderCalendar(); } catch (e) {} }
 }
 window.showTab = showTab;
 function bindManualTabs() {
@@ -930,9 +932,12 @@ window.saveSession = async function() {
     loadUpcomingSessions('week'); renderCalendar(); updatePendingBadge();
 };
 window.loadUpcomingSessions = async function(range, btn) {
+    // تم نقل قائمة الجلسات إلى تبويب الأجندة (قسم "جلسات الشهر") — نعرض الشهر فقط.
+    const listEl = document.getElementById('upcomingSessionsList');
+    if (!listEl) return; // العنصر لم يعد موجوداً في المودال؛ العرض يتم عبر renderCalendar في تبويب الأجندة.
     if (btn) { document.querySelectorAll('#sessionsRangeGroup .btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }
     const now = new Date(); const start = now.toISOString().split('T')[0]; const end = new Date();
-    if (range === 'week') end.setDate(now.getDate() + 7); else end.setMonth(now.getMonth() + 1);
+    end.setMonth(now.getMonth() + 1);
     const endStr = end.toISOString().split('T')[0];
     try {
         const sessions = await db.sessions.where('session_date').between(start, endStr, true, true).filter(s => s.office_id === currentOfficeId).toArray();
@@ -942,7 +947,7 @@ window.loadUpcomingSessions = async function(range, btn) {
             const c = await db.cases.get(s.case_id);
             if (c) html += `<div class="session-card" onclick="openCaseDetails('${c.id}')"><div class="d-flex justify-content-between"><span class="gold-text">${new Date(s.session_date).toLocaleString('ar-EG', { dateStyle: 'full', timeStyle: 'short' })}</span><span class="case-status status-new">${s.case_status}</span></div><div class="mt-2"><strong>${c.client_name || 'عميل غير مسجل'}</strong> - ${c.case_number || 'رقم غير مسجل'}${c.case_year ? '/' + c.case_year : ''}</div><div class="mt-1 text-white-50">${c.court_name || 'محكمة غير مسجلة'} · ${c.circuit || 'دائرة غير مسجلة'}</div><div class="mt-1 text-white">${s.decision || ''}</div></div>`;
         }
-        document.getElementById('upcomingSessionsList').innerHTML = html || '<div class="text-muted">لا توجد جلسات في هذه الفترة</div>';
+        listEl.innerHTML = html || '<div class="text-muted">لا توجد جلسات في هذه الفترة</div>';
     } catch (e) { }
 };
 window.openEditSession = async function(id) {
@@ -1006,7 +1011,7 @@ window.renderCalendar = async function() {
         }
         document.getElementById('calendarDays').innerHTML = html;
         const monthList = document.getElementById('agendaMonthCases');
-        if (monthList) { const caseMap = new Map((await db.cases.toArray()).map(c => [String(c.id), c])); const monthRows = sessions.filter(s => s.session_date && s.session_date.startsWith(monthStr)).sort((a,b) => String(a.session_date).localeCompare(String(b.session_date))); monthList.innerHTML = monthRows.length ? monthRows.map(s => { const c = caseMap.get(String(s.case_id)); return `<div class="agenda-month-item" onclick="openCaseDetails('${escapeHtml(s.case_id)}')"><div class="date">${escapeHtml(String(s.session_date).slice(0,16).replace('T',' '))}</div><span class="client-name-serif">${escapeHtml(c?.client_name || 'قضية غير معروفة')}</span><div class="small text-muted">${escapeHtml(c?.case_code || '')} · ${escapeHtml(s.court_name || c?.court_name || 'المحكمة غير محددة')}</div><span class="badge bg-secondary mt-1">${escapeHtml(s.case_status || 'جديدة')}</span><button class="btn btn-sm btn-outline-primary open-case-info-btn mt-2 w-100" onclick="event.stopPropagation(); openCaseDetails('${escapeHtml(s.case_id)}')"><i class="bi bi-folder2-open"></i> فتح بيانات ومعلومات القضية</button></div>`; }).join('') : '<div class="text-muted text-center py-3">لا توجد جلسات أو قضايا مجدولة في هذا الشهر.</div>'; }
+        if (monthList) { const caseMap = new Map((await db.cases.toArray()).map(c => [String(c.id), c])); const monthRows = sessions.filter(s => s.session_date && s.session_date.startsWith(monthStr)).sort((a,b) => String(a.session_date).localeCompare(String(b.session_date))); monthList.innerHTML = monthRows.length ? monthRows.map(s => { const c = caseMap.get(String(s.case_id)); const caseNum = ((c?.case_number || c?.case_code || '') + (c?.case_year ? '/' + c.case_year : '')) || 'غير مسجل'; return `<div class="agenda-month-item" onclick="openCaseDetails('${escapeHtml(s.case_id)}')"><div class="date"><i class="bi bi-calendar-event"></i> ${escapeHtml(String(s.session_date).slice(0,16).replace('T',' '))}</div><span class="client-name-serif">${escapeHtml(c?.client_name || 'قضية غير معروفة')}</span><div class="small text-muted"><i class="bi bi-hash"></i> رقم القضية: ${escapeHtml(caseNum)}</div><span class="badge bg-secondary mt-1">${escapeHtml(s.case_status || 'جديدة')}</span><button class="btn btn-sm btn-outline-primary open-case-info-btn mt-2 w-100" onclick="event.stopPropagation(); openCaseDetails('${escapeHtml(s.case_id)}')"><i class="bi bi-folder2-open"></i> فتح بيانات القضية</button></div>`; }).join('') : '<div class="text-muted text-center py-3">لا توجد جلسات أو قضايا مجدولة في هذا الشهر.</div>'; }
         loadUpcomingEvents();
     } catch (e) { console.error('خطأ في renderCalendar:', e); }
 };
@@ -1955,7 +1960,7 @@ window.runLiveSearch = async function(rawQuery) {
 };
 
 window.openCaseDetails = async function(id) {
-    if (!id) return; try { if (!currentUserRole && currentOfficeId === OWNER_OFFICE_ID) currentUserRole = 'manager'; const c=await db.cases.get(id); if (!c) return; activeCaseId=id;
+    if (!id) return; try { showTab('cases'); if (!currentUserRole && currentOfficeId === OWNER_OFFICE_ID) currentUserRole = 'manager'; const c=await db.cases.get(id); if (!c) return; activeCaseId=id;
     document.getElementById('caseDetailContent').innerHTML = `<div class="record-detail"><div class="record-code">كود الملف: ${escapeHtml(c.case_code||'-')}</div><div class="record-row"><strong>رقم القضية:</strong> ${escapeHtml(c.case_number||'-')} / ${escapeHtml(c.case_year||'-')}</div><div class="record-row"><strong>المحكمة والدائرة:</strong> ${escapeHtml(c.court_name||'-')} — ${escapeHtml(c.circuit||'-')}</div><div class="record-row"><strong>نوع القضية:</strong> ${escapeHtml(c.case_type||'-')}</div>${partyCardHtml('بيانات العميل', {name:c.client_name, role:c.client_role, nationalId:c.client_national_id, phone:c.client_phone, address:c.client_address, email:c.client_email})}${partyCardHtml('بيانات الخصم', {name:c.opponent_name, role:c.opponent_role, nationalId:c.opponent_national_id, phone:c.opponent_phone, address:c.opponent_address, email:c.opponent_email})}<div class="record-row"><strong>موضوع القضية:</strong><br>${escapeHtml(c.case_subject||'-')}</div></div>`;
     const sessions=await db.sessions.where('case_id').equals(id).toArray(); sessions.sort((a,b)=>new Date(b.session_date)-new Date(a.session_date)); currentCaseForPrint={...c,sessions}; document.getElementById('caseDetailSessions').innerHTML=sessions.length?sessions.map(x=>`<div class="session-item-row"><div><span class="text-info fw-bold fs-5">${new Date(x.session_date).toLocaleString('ar-EG',{dateStyle:'full',timeStyle:'short'})}</span><span class="badge bg-light text-dark mx-3 fs-6">${escapeHtml(x.case_status)}</span><div class="fs-6 mt-2 text-white">${escapeHtml(x.decision||'لا يوجد قرار مسجل')}</div></div>${currentUserRole === 'manager' ? `<button class="btn btn-sm btn-outline-warning" onclick="event.stopPropagation(); openEditSession('${escapeHtml(x.id)}')"><i class="bi bi-pencil fs-5"></i></button>` : ''}</div>`).join(''):'<p class="text-muted">لا توجد جلسات مسجلة لهذه القضية.</p>';
     document.getElementById('caseTopActions').innerHTML=detailTopActionsHtml(true,id); document.getElementById('caseActionsPanel').innerHTML=detailSecondaryActionsHtml(true,id); showCasePanelSection('data'); } catch(e){ console.error(e); }
