@@ -2393,7 +2393,25 @@ window.openLegalFileDetails = async function(fileId) {
     const stages = proceedings.map(p => `<div class="border rounded p-2 mb-2"><strong>${proceedingTypeLabels[p.proceeding_type] || p.proceeding_type}</strong> · ${escapeHtml(p.court_name || 'محكمة غير محددة')} · ${escapeHtml(p.case_number || 'رقم غير محدد')}<div class="small text-muted">${escapeHtml(p.status || '')}</div></div>`).join('');
     const service = actions.sort((a,b) => Number(a.sequence_order || 1) - Number(b.sequence_order || 1)).map(a => `<div class="border rounded p-2 mb-2"><strong>${escapeHtml(a.step_title || a.action_type)}</strong> · ${escapeHtml(a.authority || 'جهة غير محددة')}<div class="small text-muted">${escapeHtml(a.step_status || a.status || '')} ${a.next_followup_at ? `· متابعة ${a.next_followup_at}` : ''}${a.blocked_reason ? ` · سبب التعطيل: ${escapeHtml(a.blocked_reason)}` : ''}</div></div>`).join('');
     const status = normalizeLegalFileStatus(file.status);
-    await Swal.fire({ title: file.title, html: `<div class="text-end"><p>${escapeHtml(file.client_name)} · <strong>${escapeHtml(file.file_code)}</strong> · <span class="badge bg-secondary">${legalFileStatusLabels[status]}</span></p><hr><h6>المراحل القضائية</h6>${stages || '<p class="text-muted">لا توجد مراحل إضافية.</p>'}<h6>إجراءات الخدمات</h6>${service || '<p class="text-muted">لا توجد إجراءات مسجلة.</p>'}</div>`, confirmButtonText: 'إغلاق', background: '#fff', color: '#172b45', width: 720 });
+    const res = await Swal.fire({ title: file.title, html: `<div class="text-end"><p>${escapeHtml(file.client_name)} · <strong>${escapeHtml(file.file_code)}</strong> · <span class="badge bg-secondary">${legalFileStatusLabels[status]}</span></p><hr><h6>المراحل القضائية</h6>${stages || '<p class="text-muted">لا توجد مراحل إضافية.</p>'}<h6>إجراءات الخدمات</h6>${service || '<p class="text-muted">لا توجد إجراءات مسجلة.</p>'}</div>`, confirmButtonText: 'إغلاق', showDenyButton: true, denyButtonText: 'إضافة مرحلة تقاضٍ', background: '#fff', color: '#172b45', width: 720 });
+    if (res.isDenied) await window.addLegalFileStage(fileId);
+};
+// F4: إضافة مرحلة تقاضٍ مرتبطة بالملف الرئيسي (تُحفظ في جدول proceedings وتُزامَن)
+window.addLegalFileStage = async function(fileId) {
+    const file = await db.legalFiles.get(fileId); if (!file) return;
+    const result = await Swal.fire({
+        title: 'إضافة مرحلة تقاضٍ',
+        html: '<select id="lfStageType" class="swal2-select"><option value="first_instance">أول درجة</option><option value="appeal">استئناف</option><option value="cassation">نقض</option><option value="retrial">إعادة نظر</option><option value="opposition">معارضة</option><option value="enforcement">تنفيذ</option><option value="execution_objection">إشكال تنفيذ</option></select><input id="lfStageCourt" class="swal2-input" placeholder="المحكمة"><input id="lfStageNumber" class="swal2-input" placeholder="رقم القضية في هذه المرحلة">',
+        focusConfirm: false, showCancelButton: true, confirmButtonText: 'إضافة المرحلة', cancelButtonText: 'إلغاء',
+        preConfirm: () => ({ type: document.getElementById('lfStageType').value, court: document.getElementById('lfStageCourt').value.trim(), number: document.getElementById('lfStageNumber').value.trim() })
+    });
+    if (!result.isConfirmed) return;
+    const proceeding = { id: generateUUID(), legal_file_id: fileId, office_id: currentOfficeId, proceeding_type: result.value.type, court_name: result.value.court, case_number: result.value.number, status: 'قيد الإجراء', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+    await db.proceedings.put(proceeding);
+    await db.pendingOperations.add({ operation: 'upsert_proceeding', data: proceeding, timestamp: Date.now() });
+    if (typeof updatePendingBadge === 'function') updatePendingBadge();
+    Swal.fire({ icon: 'success', title: 'تمت إضافة المرحلة', timer: 1500, showConfirmButton: false });
+    await window.openLegalFileDetails(fileId);
 };
 
 window.showTeamManagement = function() { if (!ownerOnly('إدارة الفريق')) return; showModal('teamManagementModal'); };
