@@ -15,3 +15,7 @@ user-data/
 # Local generated receipt exports
 receipts-local/
 
+
+# ملفات تشخيصية محلية (لا تُرفع)
+diag*.js
+shot.js

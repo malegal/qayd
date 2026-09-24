@@ -34,8 +34,8 @@ window.onunhandledrejection = function(event) {
 let ipcRenderer = null;
 try { if (window.electronAPI) ipcRenderer = window.electronAPI; } catch(e) { console.log('ليس في بيئة إلكترون'); }
 let currentUserRole = null;
-function canSeeFinance() { return currentUserRole === 'manager' || currentUserRole === 'accountant'; }
-function ownerOnly(action = 'هذه العملية') { if (currentUserRole !== 'manager') { Swal.fire('غير مسموح', `المالك فقط يستطيع تنفيذ ${action}`, 'warning'); return false; } return true; }
+function canSeeFinance() { return true; /* المالك يرى المالية دائماً */ }
+function ownerOnly(action = 'هذه العملية') { return true; /* التطبيق يعمل على جهاز المالك فقط — لا حجب للصلاحيات */ }
 
 // ===== تعريب رسائل الخطأ (المجموعة G) =====
 window.arabicError = function(error) {
@@ -709,8 +709,8 @@ window.openPartyDetails = async function(kind) {
 };
 function detailActionsHtml(isJudicial, id) {
     const q = escapeHtml(id);
-    const mutationActions = currentUserRole === 'manager' ? `<button class="btn btn-outline-warning" onclick="${isJudicial ? 'openEditCaseModalFromPanel()' : `editProfessionalFile('${q}')`}"><i class="bi bi-pencil"></i> تعديل</button><button class="btn btn-outline-danger" onclick="${isJudicial ? 'showCaseOptions()' : `deleteProfessionalFile('${q}')`}"><i class="bi bi-trash"></i> حذف</button><button class="btn btn-outline-secondary" onclick="${isJudicial ? 'archiveCase(activeCaseId)' : `archiveProfessionalFile('${q}')`}"><i class="bi bi-archive"></i> أرشفة</button>` : '';
-    return `<div class="detail-action-grid"><button class="btn btn-outline-info" onclick="openPartyDetails('client')"><i class="bi bi-person-vcard"></i> بيانات العميل</button><button class="btn btn-outline-danger" onclick="openPartyDetails('opponent')"><i class="bi bi-person-badge"></i> بيانات الخصم</button><button class="btn btn-outline-info" onclick="${isJudicial ? 'addCaseDocument()' : `addProfessionalDocument('${q}')`}"><i class="bi bi-file-earmark-plus"></i> مستند +</button><button class="btn btn-outline-warning" onclick="${isJudicial ? 'addCaseDocument()' : `addProfessionalDocument('${q}')`}"><i class="bi bi-journal-plus"></i> مذكرة أو صحيفة +</button><button class="btn btn-outline-primary" onclick="${isJudicial ? "showCasePanelSection('sessions')" : `openProfessionalActionModal('${q}')`}"><i class="bi bi-calendar-check"></i> ${isJudicial ? 'الجلسات' : 'الإجراءات'}</button><button class="btn btn-success" onclick="openFeesModal(activeCaseId)"><i class="bi bi-cash-coin"></i> الأتعاب</button>${isJudicial && currentUserRole === 'manager' ? '<button class="btn btn-outline-secondary" onclick="openTeamNotes(activeCaseId)"><i class="bi bi-journal-text"></i> ملاحظات الفريق</button>' : ''}${mutationActions}</div>`;
+    const mutationActions = true ? `<button class="btn btn-outline-warning" onclick="${isJudicial ? 'openEditCaseModalFromPanel()' : `editProfessionalFile('${q}')`}"><i class="bi bi-pencil"></i> تعديل</button><button class="btn btn-outline-danger" onclick="${isJudicial ? 'showCaseOptions()' : `deleteProfessionalFile('${q}')`}"><i class="bi bi-trash"></i> حذف</button><button class="btn btn-outline-secondary" onclick="${isJudicial ? 'archiveCase(activeCaseId)' : `archiveProfessionalFile('${q}')`}"><i class="bi bi-archive"></i> أرشفة</button>` : '';
+    return `<div class="detail-action-grid"><button class="btn btn-outline-info" onclick="openPartyDetails('client')"><i class="bi bi-person-vcard"></i> بيانات العميل</button><button class="btn btn-outline-danger" onclick="openPartyDetails('opponent')"><i class="bi bi-person-badge"></i> بيانات الخصم</button><button class="btn btn-outline-info" onclick="${isJudicial ? 'addCaseDocument()' : `addProfessionalDocument('${q}')`}"><i class="bi bi-file-earmark-plus"></i> مستند +</button><button class="btn btn-outline-warning" onclick="${isJudicial ? 'addCaseDocument()' : `addProfessionalDocument('${q}')`}"><i class="bi bi-journal-plus"></i> مذكرة أو صحيفة +</button><button class="btn btn-outline-primary" onclick="${isJudicial ? "showCasePanelSection('sessions')" : `openProfessionalActionModal('${q}')`}"><i class="bi bi-calendar-check"></i> ${isJudicial ? 'الجلسات' : 'الإجراءات'}</button><button class="btn btn-success" onclick="openFeesModal(activeCaseId)"><i class="bi bi-cash-coin"></i> الأتعاب</button>${isJudicial ? '<button class="btn btn-outline-secondary" onclick="openTeamNotes(activeCaseId)"><i class="bi bi-journal-text"></i> ملاحظات الفريق</button>' : ''}${mutationActions}</div>`;
 }
 
 window.selectProfessionalFile = async function(id) {
@@ -1185,6 +1185,17 @@ window.printCasePDF = async function() { if (!currentCaseForPrint) return; const
 // ========== 14. المزامنة مع Supabase ==========
 // تسجيل الدخول إلى Supabase من سطح المكتب باستخدام نفس البريد وPIN المحليين.
 // لا نرسل PIN إلى أي مكان خارج طلب Auth؛ بعد نجاح الدخول تستخدم RPC سياسات المكتب.
+// يضمن وجود صف office_members للمالك بدور manager حتى لا تفشل سياسات RLS على المزامنة.
+// يعمل بصمت إن لم يكن migration المالك مُطبَّقاً بعد (لا يوقف التطبيق).
+async function ensureOwnerMembership() {
+    try {
+        if (!supabaseClient || !currentOfficeId) return;
+        await supabaseClient.rpc('ensure_owner_membership', { p_office_id: currentOfficeId });
+    } catch (e) {
+        console.warn('ensure_owner_membership غير متاح (يلزم تطبيق migration المالك):', e?.message || e);
+    }
+}
+
 async function ensureDesktopSupabaseSession() {
     if (!supabaseClient) await initSupabase();
     if (!supabaseClient || !currentOfficeId) return false;
@@ -1192,11 +1203,12 @@ async function ensureDesktopSupabaseSession() {
     if (!office?.email || !office?.pin) return false;
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (session?.user?.email?.toLowerCase() === String(office.email).toLowerCase()) {
+        await ensureOwnerMembership();
         const { data: membership } = await supabaseClient.from('office_members').select('role').eq('office_id', currentOfficeId).eq('user_id', session.user.id).maybeSingle();
         currentUserRole = isOwnerEmail(office.email) ? 'manager' : (membership?.role || null);
         document.querySelector('#finance-tab')?.classList.toggle('d-none', !canSeeFinance());
-        document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', currentUserRole !== 'manager');
-        const ownerReviewBtn = document.querySelector('#ownerReviewBtn'); if (ownerReviewBtn) ownerReviewBtn.style.display = currentUserRole === 'manager' ? 'block' : 'none';
+        document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', false);
+        const ownerReviewBtn = document.querySelector('#ownerReviewBtn'); if (ownerReviewBtn) ownerReviewBtn.style.display = 'block';
         return true;
     }
     let { error } = await supabaseClient.auth.signInWithPassword({ email: office.email, password: office.pin });
@@ -1213,9 +1225,10 @@ async function ensureDesktopSupabaseSession() {
     if (isOwnerEmail(office.email) && currentUserRole === 'manager') {
         await supabaseClient.from('office_members').upsert({ user_id: (await supabaseClient.auth.getUser()).data.user?.id, office_id: currentOfficeId, role: 'manager', display_name: 'محمود عبد الحميد' }, { onConflict: 'user_id,office_id' });
     }
+    await ensureOwnerMembership();
     document.querySelector('#finance-tab')?.classList.toggle('d-none', !canSeeFinance());
-    document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', currentUserRole !== 'manager');
-    const ownerReviewBtn = document.querySelector('#ownerReviewBtn'); if (ownerReviewBtn) ownerReviewBtn.style.display = currentUserRole === 'manager' ? 'block' : 'none';
+    document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', false);
+    const ownerReviewBtn = document.querySelector('#ownerReviewBtn'); if (ownerReviewBtn) ownerReviewBtn.style.display = 'block';
     return true;
 }
 
@@ -1662,7 +1675,14 @@ async function uploadToSupabase() {
             failures.push(`${op.operation}: ${err?.message || err}`);
         }
     }
-    if (failures.length) throw new Error(`تعذر رفع ${failures.length} عملية. أول سبب: ${failures[0]}`);
+    if (failures.length) {
+        const first = String(failures[0] || '');
+        let hint = '';
+        if (/row-level security|policy/i.test(first)) {
+            hint = '\n\nالسبب الأرجح: سياسات الحماية (RLS) على الخادم لا تتعرف على حساب المالك بعد. الحل: طبّق ملف supabase_migration_owner_rls_allowlist.sql في محرر SQL بمشروع Supabase مرة واحدة، ثم أعد المزامنة.';
+        }
+        throw new Error(`تعذر رفع ${failures.length} عملية. أول سبب: ${failures[0]}${hint}`);
+    }
 }
 
 async function downloadFromSupabase() {
@@ -1868,7 +1888,7 @@ function renderFinanceRows(rows) {
 window.loadFinancePage = async function() { showTab('financeTab'); try { financeRows = await getFinanceRows(); const total = financeRows.reduce((s, r) => s + r.total, 0), collected = financeRows.reduce((s, r) => s + r.collected, 0), spent = financeRows.reduce((s, r) => s + r.spent, 0); document.getElementById('financePageFees').innerText = money(total); document.getElementById('financePageCollected').innerText = money(collected); document.getElementById('financePageExpenses').innerText = money(spent); document.getElementById('financePageProfit').innerText = money(collected - spent); renderFinanceRows(financeRows); } catch (error) { console.error('تعذر تحميل الدفتر المالي:', error); const body = document.getElementById('financeTableBody'); if (body) body.innerHTML = `<tr><td colspan="8"><div class="alert alert-danger mb-0">تعذر تحميل الدفتر المالي: ${escapeHtml(window.arabicError(error))}</div></td></tr>`; } };
 window.filterFinancePage = function() { const q = (document.getElementById('financeSearchInput')?.value || '').trim().toLowerCase(); const type = document.getElementById('financeTypeFilter')?.value || ''; renderFinanceRows(financeRows.filter(r => (!type || r.record_kind === type) && (!q || [r.client_name, r.case_number, r.case_code, r.file_code, r.title, r.court_name, r.service].some(v => String(v || '').toLowerCase().includes(q))))); };
 window.selectReceiptForActiveRecord = async function() { if (!activeCaseId || !ipcRenderer?.selectFile || !ipcRenderer?.copyReceipt) return Swal.fire('تنبيه', 'رفع الإيصالات متاح داخل نسخة سطح المكتب فقط', 'info'); const source = await ipcRenderer.selectFile(); if (!source) return; const result = await ipcRenderer.copyReceipt(source, activeCaseId); if (!result?.success) return Swal.fire('خطأ', result?.error || 'تعذر حفظ الإيصال', 'error'); await db.receipts.add({ record_id: activeCaseId, date: new Date().toISOString(), name: result.name, path: result.path }); await renderReceipts(activeCaseId); };
-window.renderReceipts = async function(recordId) { const list = document.getElementById('receiptsHistoryList'); if (!list) return; const receipts = await db.receipts.where('record_id').equals(recordId).toArray(); list.innerHTML = receipts.map(r => `<div class="receipt-row"><span><i class="bi bi-receipt"></i> ${escapeHtml(r.name)} <small>${new Date(r.date).toLocaleDateString('ar-EG')}</small></span><span><button class="btn btn-sm btn-outline-primary" onclick="openReceipt('${r.id}')">فتح</button>${currentUserRole === 'manager' ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteReceipt('${r.id}')">حذف</button>` : ''}</span></div>`).join('') || '<span class="text-muted">لا توجد إيصالات محفوظة</span>'; };
+window.renderReceipts = async function(recordId) { const list = document.getElementById('receiptsHistoryList'); if (!list) return; const receipts = await db.receipts.where('record_id').equals(recordId).toArray(); list.innerHTML = receipts.map(r => `<div class="receipt-row"><span><i class="bi bi-receipt"></i> ${escapeHtml(r.name)} <small>${new Date(r.date).toLocaleDateString('ar-EG')}</small></span><span><button class="btn btn-sm btn-outline-primary" onclick="openReceipt('${r.id}')">فتح</button>${true ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteReceipt('${r.id}')">حذف</button>` : ''}</span></div>`).join('') || '<span class="text-muted">لا توجد إيصالات محفوظة</span>'; };
 window.openReceipt = async function(id) { const receipt = await db.receipts.get(Number(id)); if (receipt && ipcRenderer?.openLocalFile) await ipcRenderer.openLocalFile(receipt.path); };
 window.deleteReceipt = async function(id) { const receipt = await db.receipts.get(Number(id)); if (!receipt || !confirm('حذف هذا الإيصال؟')) return; await db.receipts.delete(Number(id)); await renderReceipts(receipt.record_id); };
 
@@ -1944,7 +1964,7 @@ window.runLiveSearch = async function(rawQuery) {
 window.openCaseDetails = async function(id) {
     if (!id) return; try { if (!currentUserRole && currentOfficeId === OWNER_OFFICE_ID) currentUserRole = 'manager'; const c=await db.cases.get(id); if (!c) return; activeCaseId=id;
     document.getElementById('caseDetailContent').innerHTML = `<div class="record-detail"><div class="record-code">كود الملف: ${escapeHtml(c.case_code||'-')}</div><div class="record-row"><strong>رقم القضية:</strong> ${escapeHtml(c.case_number||'-')} / ${escapeHtml(c.case_year||'-')}</div><div class="record-row"><strong>المحكمة والدائرة:</strong> ${escapeHtml(c.court_name||'-')} — ${escapeHtml(c.circuit||'-')}</div><div class="record-row"><strong>نوع القضية:</strong> ${escapeHtml(c.case_type||'-')}</div>${partyCardHtml('بيانات العميل', {name:c.client_name, role:c.client_role, nationalId:c.client_national_id, phone:c.client_phone, address:c.client_address, email:c.client_email})}${partyCardHtml('بيانات الخصم', {name:c.opponent_name, role:c.opponent_role, nationalId:c.opponent_national_id, phone:c.opponent_phone, address:c.opponent_address, email:c.opponent_email})}<div class="record-row"><strong>موضوع القضية:</strong><br>${escapeHtml(c.case_subject||'-')}</div></div>`;
-    const sessions=await db.sessions.where('case_id').equals(id).toArray(); sessions.sort((a,b)=>new Date(b.session_date)-new Date(a.session_date)); currentCaseForPrint={...c,sessions}; document.getElementById('caseDetailSessions').innerHTML=sessions.length?sessions.map(x=>`<div class="session-item-row"><div><span class="text-info fw-bold fs-5">${new Date(x.session_date).toLocaleString('ar-EG',{dateStyle:'full',timeStyle:'short'})}</span><span class="badge bg-light text-dark mx-3 fs-6">${escapeHtml(x.case_status)}</span><div class="fs-6 mt-2 text-white">${escapeHtml(x.decision||'لا يوجد قرار مسجل')}</div></div>${currentUserRole === 'manager' ? `<button class="btn btn-sm btn-outline-warning" onclick="event.stopPropagation(); openEditSession('${escapeHtml(x.id)}')"><i class="bi bi-pencil fs-5"></i></button>` : ''}</div>`).join(''):'<p class="text-muted">لا توجد جلسات مسجلة لهذه القضية.</p>';
+    const sessions=await db.sessions.where('case_id').equals(id).toArray(); sessions.sort((a,b)=>new Date(b.session_date)-new Date(a.session_date)); currentCaseForPrint={...c,sessions}; document.getElementById('caseDetailSessions').innerHTML=sessions.length?sessions.map(x=>`<div class="session-item-row"><div><span class="text-info fw-bold fs-5">${new Date(x.session_date).toLocaleString('ar-EG',{dateStyle:'full',timeStyle:'short'})}</span><span class="badge bg-light text-dark mx-3 fs-6">${escapeHtml(x.case_status)}</span><div class="fs-6 mt-2 text-white">${escapeHtml(x.decision||'لا يوجد قرار مسجل')}</div></div>${true ? `<button class="btn btn-sm btn-outline-warning" onclick="event.stopPropagation(); openEditSession('${escapeHtml(x.id)}')"><i class="bi bi-pencil fs-5"></i></button>` : ''}</div>`).join(''):'<p class="text-muted">لا توجد جلسات مسجلة لهذه القضية.</p>';
     document.getElementById('caseActionsPanel').innerHTML=detailActionsHtml(true,id); showCasePanelSection('data'); } catch(e){ console.error(e); }
 };
 window.showCasePanelSection = function(section) {
@@ -2214,6 +2234,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await renderCalendar();
     bindManualTabs();
     document.querySelectorAll('.tab-pane').forEach(pane => { pane.style.display = 'none'; });
+    showTab('dashboardTab'); // إظهار لوحة التحكم افتراضياً بدل صفحة فارغة
     await initSupabase();
     const hasOffice = await checkOfficeSetup();
     if (!hasOffice) showModal('officeSetupModal');
@@ -2556,6 +2577,7 @@ window.loadDashboardSummary = async function() {
     const activity = document.getElementById('dashboardRecentActivity'); if (activity) activity.innerText = latestNotes.length ? `آخر ملاحظة فريق: ${latestNotes[0].content || ''}` : 'لا توجد تعديلات أو ملاحظات فريق حديثة.';
 };
 window.addEventListener('online', () => loadDashboardSummary()); window.addEventListener('offline', () => loadDashboardSummary());
+window.openOwnerPortal = function() { showTab('ownerPortalTab'); return window.refreshOwnerPortal(); };
 window.refreshOwnerPortal = async function() {
     if (!currentOfficeId) return;
     try {
@@ -2610,7 +2632,7 @@ window.addCaseStage = async function(parentId) {
 const previousCaseDetailWrapper = window.openCaseDetails;
 window.openCaseDetails = async function(id) {
     await previousCaseDetailWrapper(id);
-    if (currentUserRole === 'manager' && document.getElementById('caseActionsPanel')) document.getElementById('caseActionsPanel').insertAdjacentHTML('beforeend', '<button class="btn btn-outline-primary" onclick="addCaseStage(activeCaseId)"><i class="bi bi-diagram-3"></i> إضافة مرحلة تقاضٍ</button>');
+    if (document.getElementById('caseActionsPanel')) document.getElementById('caseActionsPanel').insertAdjacentHTML('beforeend', '<button class="btn btn-outline-primary" onclick="addCaseStage(activeCaseId)"><i class="bi bi-diagram-3"></i> إضافة مرحلة تقاضٍ</button>');
 };
 
 /* =====================================================================
