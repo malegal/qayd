@@ -65,6 +65,10 @@
         .case-card-item:hover, .case-card-item.active { background: rgba(190,145,36,0.10); border-color: var(--gold-solid); }
         .case-panel-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
         .case-panel-actions .btn { min-height: 42px; font-weight: 800; }
+        /* شريط الأزرار الرئيسي الأفقي أعلى ملف القضية: + مرحلة تقاضي / + إجراء / + جلسة / فتح الملف الرئيسي */
+        .case-main-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .85rem; }
+        .case-main-actions .btn { flex: 1 1 auto; min-width: 132px; min-height: 42px; font-weight: 800; white-space: nowrap; }
+        .case-main-file { border-top: 1px dashed var(--border-color); padding-top: .75rem; }
         @media (max-width: 900px) { .case-detail-panel { min-width: 100%; } }
         .filter-bar { display: flex; gap: 8px; margin-bottom: 1rem; flex-wrap: wrap; }
         .filter-bar input, .filter-bar select { flex: 1; min-width: 120px; }
@@ -255,9 +259,8 @@
     <!-- الشريط الجانبي (مبسط) -->
     <div id="sidebar">
         <div class="sidebar-brand">
-            <div class="text-white-50 small mb-1">مكتب</div>
-            <div class="gold-text fs-5 fw-bold mb-1" id="sidebarOfficeName">اسم المحامي</div>
-            <div class="text-white-50 small">المحامي</div>
+            <div class="gold-text fs-5 fw-bold mb-1">مكتب جاد الرب للمحاماة</div>
+            <div class="text-white-50 small">محمود عبد الحميد</div>
         </div>
         <div class="nav flex-column nav-pills sidebar-tabs" role="tablist">
             <button class="nav-link active" id="dashboard-tab" data-bs-target="#dashboardTab" type="button" role="tab" onclick="loadDashboardSummary(); refreshOwnerPortal()"><i class="bi bi-speedometer2 fs-5"></i> لوحة التحكم</button>
@@ -328,9 +331,9 @@
                     <div class="calendar-section">
                         <!-- شريط الأزرار السريعة أعلى التقويم: جلسة / مهمة / حدث / حاسبة المواعيد -->
                         <div class="agenda-quick-bar">
-                            <button class="btn btn-success agenda-quick-btn" onclick="openNewSessionShortcut()"><i class="bi bi-calendar-plus"></i> (+ جلسة)</button>
-                            <button class="btn btn-outline-warning agenda-quick-btn" onclick="openAgendaItemModal('task')"><i class="bi bi-list-check"></i> (+ مهمة)</button>
-                            <button class="btn btn-outline-info agenda-quick-btn" onclick="openAgendaItemModal('event')"><i class="bi bi-calendar-event"></i> (+ حدث)</button>
+                            <button class="btn btn-success agenda-quick-btn" onclick="openNewSessionShortcut()"><i class="bi bi-calendar-plus"></i> + جلسة</button>
+                            <button class="btn btn-outline-warning agenda-quick-btn" onclick="openAgendaItemModal('task')"><i class="bi bi-list-check"></i> + مهمة</button>
+                            <button class="btn btn-outline-info agenda-quick-btn" onclick="openAgendaItemModal('event')"><i class="bi bi-calendar-event"></i> + حدث</button>
                             <button class="btn btn-outline-primary agenda-quick-btn" onclick="openDeadlineCalculatorModal()"><i class="bi bi-calculator"></i> حاسبة المواعيد</button>
                         </div>
                         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -349,6 +352,7 @@
                         <div id="upcomingEventsList" style="max-height:250px; overflow-y:auto;"></div>
                     </div>
                 </div>
+            </div>
             </div>
 
 
@@ -403,6 +407,7 @@
                             <h5 class="gold-text mb-0">ملف القضية</h5>
                             <span class="small text-muted">اختر من القائمة</span>
                         </div>
+                        <div id="caseTopActions" class="case-main-actions"></div>
                         <div id="caseDetailDataSection" class="case-panel-section">
                             <div id="caseDetailContent">اختر قضية لعرض التفاصيل</div>
                         </div>
