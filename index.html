@@ -171,10 +171,16 @@
 .portal-columns { display:grid; grid-template-columns:1.2fr 1fr; gap:1rem; }
 .portal-list { max-height:310px; overflow:auto; }
 .portal-list-item { border-bottom:1px solid var(--border); padding:.7rem 0; }
-.agenda-layout { display:grid; grid-template-columns:minmax(0,1fr) 330px; gap:1rem; align-items:start; }
-.agenda-month-list { max-height:620px; overflow:auto; }
-.agenda-month-item { border-right:4px solid var(--gold); background:#fff; border-radius:10px; padding:.7rem; margin-bottom:.65rem; box-shadow:0 3px 10px rgba(18,51,91,.06); }
-.agenda-month-item .date { color:var(--gold-dark,#8a6814); font-weight:900; }
+.agenda-layout { display:grid; grid-template-columns:minmax(0,1fr) 390px; gap:1rem; align-items:start; }
+.agenda-month-list { max-height:640px; overflow:auto; padding-left:4px; }
+.agenda-month-item { border-right:5px solid var(--gold); background:#fff; border-radius:12px; padding:.85rem 1rem; margin-bottom:.7rem; box-shadow:0 4px 14px rgba(18,51,91,.08); transition:.2s; cursor:pointer; }
+.agenda-month-item:hover { box-shadow:0 8px 22px rgba(18,51,91,.16); transform:translateY(-1px); }
+.agenda-month-item .date { color:var(--gold-dark,#8a6814); font-weight:900; font-size:1.05rem; letter-spacing:.2px; margin-bottom:.35rem; }
+.agenda-month-item strong { font-size:1.02rem; color:var(--navy,#12335b); display:block; margin-bottom:.2rem; }
+.agenda-month-item .small { font-size:.85rem; line-height:1.5; }
+.agenda-month-item .badge { font-size:.78rem; font-weight:800; padding:.35em .7em; }
+.agenda-quick-actions { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:.6rem; }
+.agenda-quick-actions .btn { font-size:.82rem; font-weight:800; padding:.35rem .8rem; border-radius:8px; }
 .case-form-section { border:1px solid var(--border); border-radius:12px; padding:1rem; background:#fbfdff; }
 .case-form-section-title { color:var(--navy); font-weight:900; border-bottom:1px solid var(--border); padding-bottom:.5rem; margin-bottom:.8rem; }
 .detail-action-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(135px,1fr)); gap:.5rem; }
@@ -316,6 +322,12 @@
                             <h3 class="gold-text m-0" id="calendarMonthYear"></h3>
                             <button class="btn btn-outline-warning btn-sm" onclick="changeMonth(1)">التالي</button>
                         </div>
+                        <!-- F2: أزرار سريعة صغيرة فوق التقويم مباشرة -->
+                        <div class="agenda-quick-actions">
+                            <button class="btn btn-sm btn-success" onclick="openAgendaItemModal('event')"><i class="bi bi-calendar-event"></i> إضافة حدث</button>
+                            <button class="btn btn-sm btn-outline-warning" onclick="openAgendaItemModal('task')"><i class="bi bi-list-check"></i> إضافة مهمة</button>
+                            <button class="btn btn-sm btn-outline-info" onclick="openDeadlineCalculatorModal()"><i class="bi bi-calculator"></i> حاسبة المواعيد</button>
+                        </div>
                         <div class="calendar-grid" id="calendarHeaders"></div>
                         <div class="calendar-grid" id="calendarDays"></div>
                     </div>
@@ -327,6 +339,7 @@
                         <div id="upcomingEventsList" style="max-height:250px; overflow-y:auto;"></div>
                     </div>
                 </div>
+            </div>
             </div>
 
 
@@ -344,14 +357,15 @@
                     <div class="d-flex justify-content-between align-items-center mb-3">
                     <h3 class="gold-text">إدارة الملفات</h3>
                     <!-- الملف القضائي له جلسات؛ الملفات الإجرائية والخدمية تدار من النموذج الموحد دون جلسات محكمة. -->
-                    <div class="d-flex gap-2 flex-wrap"><button class="gold-btn" onclick="openAddCaseModal()"><i class="bi bi-plus-lg"></i> ملف قضائي +</button><button class="btn btn-outline-warning" onclick="openProcedureFileModal()"><i class="bi bi-folder-plus"></i> ملف إجرائي/خدمي +</button></div>
+                    <div class="d-flex gap-2 flex-wrap align-items-center"><button class="gold-btn" onclick="openUnifiedAddFileChooser()"><i class="bi bi-plus-lg"></i> إضافة ملف جديد</button><button class="btn btn-outline-primary" onclick="openUnifiedFileHub()"><i class="bi bi-collection"></i> كل الملفات (مركز موحّد)</button><button class="btn btn-outline-secondary" onclick="openLegalFilesPanel()"><i class="bi bi-diagram-3"></i> المراحل والملفات الرئيسية</button></div>
+                    <div class="small text-muted mt-2 mb-2"><i class="bi bi-info-circle"></i> <strong>الملف القضائي</strong> = دعوى لها جلسات محكمة. <strong>الملف الإجرائي/الخدمي</strong> = نيابة/عقار/عقود بلا جلسات. <strong>الملف الرئيسي</strong> = يجمع درجات التقاضي كمراحل + كل الإجراءات في مكان واحد.</div>
                     </div>
                     <!-- لوحة اختصارات سريعة للعمليات اليومية الأكثر استخدامًا. -->
                     <div class="quick-actions-grid">
                         <button class="btn btn-outline-info quick-action" onclick="openDocumentShortcut()"><i class="bi bi-file-earmark-plus"></i> مستند +</button>
                         <button class="btn btn-outline-success quick-action" onclick="openNewSessionShortcut()"><i class="bi bi-calendar-plus"></i> جلسة +</button>
                         <button class="btn btn-outline-primary quick-action" onclick="openAdvancedSearchModal()"><i class="bi bi-search"></i> بحث</button>
-                        <button class="btn btn-outline-secondary quick-action" onclick="syncWithSupabase()"><i class="bi bi-arrow-repeat"></i> مزامنة</button>
+                        <button class="btn btn-outline-secondary quick-action" onclick="syncWithSupabase()"><i class="bi bi-arrow-repeat"></i> مزامنة</button><button class="btn btn-outline-dark quick-action" onclick="openUnifiedFileHub()"><i class="bi bi-collection"></i> كل الملفات</button>
                     </div>
                     <div class="cases-container">
                     <div class="cases-list">
@@ -801,6 +815,87 @@ label, .form-label { color:var(--text) !important; font-weight:700; }
 @media(max-width:900px){.finance-summary-grid{grid-template-columns:repeat(2,1fr)}.finance-toolbar{flex-wrap:wrap}.finance-toolbar .form-select{max-width:none;flex:1}.finance-table{font-size:.88rem}}
 @media(max-width:600px){.finance-summary-grid{grid-template-columns:1fr}.page-heading{display:block}}
 .professional-file-row { background:#ffffff; color:var(--text, #172b45); border-color:var(--border, #d8e1ec); }.record-detail { color:var(--text); font-size:1rem; }.record-code { background:var(--navy); color:#fff; border-radius:8px; padding:10px 14px; font-weight:800; margin-bottom:12px; direction:rtl; }.record-row { padding:7px 0; border-bottom:1px solid var(--border); }.record-row strong { color:var(--navy); }.party-card { background:#f8fafc; border:1px solid var(--border); border-right:4px solid var(--gold); border-radius:10px; padding:12px; margin:12px 0; }.party-card h6 { font-weight:800; }.party-card strong { color:var(--navy); }.detail-action-grid { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }.detail-action-grid .btn { flex:1 1 auto; min-width:120px; }
+</style>
+<style>
+/* ===== المجموعة J: تحسين الشكل والأزرار (إضافة فقط دون حذف أي نمط قائم) ===== */
+:root{
+  --navy:#12335b; --navy-dark:#0b2341; --gold:#a87508; --gold-2:#d5b04c;
+  --shadow-sm:0 2px 8px rgba(18,51,91,.08);
+  --shadow-md:0 8px 24px rgba(18,51,91,.12);
+  --shadow-lg:0 16px 40px rgba(18,51,91,.18);
+}
+/* أزرار موحّدة بحركات ناعمة */
+.btn{ border-radius:10px !important; font-weight:700; transition:transform .16s ease, box-shadow .16s ease, background-color .16s ease, color .16s ease; }
+.btn:hover{ transform:translateY(-1px); }
+.btn:active{ transform:translateY(0); }
+.btn:focus-visible{ outline:none; box-shadow:0 0 0 .22rem rgba(168,117,8,.28); }
+/* زر ذهبي أساسي واضح */
+.gold-btn{ background:linear-gradient(135deg,#a87508 0%,#d5b04c 48%,#8a6814 100%) !important; color:#1a1300 !important; border:none !important; font-weight:800 !important; letter-spacing:.2px; box-shadow:0 6px 16px rgba(168,117,8,.30) !important; }
+.gold-btn:hover{ box-shadow:0 10px 24px rgba(168,117,8,.42) !important; filter:brightness(1.05); }
+.navy-btn{ background:linear-gradient(135deg,#12335b,#1e4d7b) !important; color:#fff !important; border:none !important; border-radius:10px; font-weight:800; box-shadow:var(--shadow-sm); }
+.navy-btn:hover{ box-shadow:var(--shadow-md); color:#fff !important; }
+.btn-outline-primary{ --bs-btn-color:#12335b; --bs-btn-border-color:#12335b; }
+.btn-outline-primary:hover{ background:#12335b; border-color:#12335b; color:#fff; box-shadow:0 6px 16px rgba(18,51,91,.28); }
+.btn-outline-warning{ --bs-btn-color:#8a6814; --bs-btn-border-color:#a87508; }
+.btn-outline-warning:hover{ background:#a87508; border-color:#a87508; color:#fff; box-shadow:0 6px 16px rgba(168,117,8,.32); }
+.btn-outline-info:hover{ box-shadow:0 6px 16px rgba(14,116,144,.3); }
+.btn-outline-success:hover{ box-shadow:0 6px 16px rgba(22,163,74,.3); }
+.btn-outline-danger:hover{ box-shadow:0 6px 16px rgba(220,38,38,.3); }
+
+/* بطاقات أنيقة */
+.card-glass,.case-card-item,.case-detail-panel,.calendar-section,.calculator-section,.dashboard-card,.owner-portal-card,.finance-summary-card{
+  border-radius:14px !important; transition:box-shadow .2s ease, transform .2s ease;
+}
+.case-card-item:hover{ transform:translateY(-2px); box-shadow:var(--shadow-md); }
+.dashboard-card:hover,.owner-portal-card:hover{ transform:translateY(-2px); box-shadow:var(--shadow-md); }
+
+/* تبويبات جانبية أوضح */
+.nav-pills .nav-link{ border-radius:10px !important; margin:2px 8px; transition:all .18s ease; }
+.nav-pills .nav-link.active{ box-shadow:inset 0 0 0 1px rgba(213,176,76,.35); }
+
+/* العناوين */
+.page-heading h3{ letter-spacing:.2px; }
+h3,h4,h5{ letter-spacing:.15px; }
+
+/* النماذج */
+.form-control,.form-select{ border-radius:10px !important; }
+.form-control:hover,.form-select:hover{ border-color:#a87508; }
+
+/* الجداول */
+.table thead th{ background:#eef3f8; color:#12335b; font-weight:800; border-bottom:2px solid #d5b04c; }
+
+/* شارات */
+.badge{ border-radius:8px; font-weight:700; }
+
+/* تحسين المسافات RTL */
+#mainContent{ padding:1.6rem 1.8rem; }
+@media (max-width:700px){ #mainContent{ padding:1rem; } }
+
+/* رأس المودال */
+.modal-header{ background:linear-gradient(135deg,#f8fafc,#eef3f8); border-radius:14px 14px 0 0; }
+.modal-content{ border-radius:14px !important; }
+
+/* الخط الزمني للمراحل */
+.lf-timeline{ position:relative; padding-right:22px; }
+.lf-timeline::before{ content:''; position:absolute; right:8px; top:4px; bottom:4px; width:3px; background:linear-gradient(180deg,#a87508,#d5b04c); border-radius:3px; }
+.lf-timeline-item{ position:relative; margin-bottom:.7rem; background:#fff; border:1px solid #e1e7ef; border-radius:10px; padding:.6rem .8rem; box-shadow:var(--shadow-sm); }
+.lf-timeline-item::before{ content:''; position:absolute; right:-18px; top:14px; width:12px; height:12px; border-radius:50%; background:#a87508; border:2px solid #fff; box-shadow:0 0 0 2px rgba(168,117,8,.35); }
+.lf-timeline-item .lf-t{ font-weight:800; color:#12335b; }
+.lf-timeline-item .lf-m{ font-size:.82rem; color:#53657d; }
+.lf-stage-badge{ background:linear-gradient(135deg,#12335b,#1e4d7b); color:#fff; font-size:.72rem; font-weight:800; padding:.2em .6em; border-radius:6px; }
+
+/* بطاقات الملف الموحّد */
+.uf-hub-tabs{ display:flex; gap:.4rem; flex-wrap:wrap; margin-bottom:.8rem; }
+.uf-hub-tabs .btn{ font-size:.82rem; font-weight:800; }
+.uf-card{ display:flex; justify-content:space-between; align-items:center; gap:.6rem; background:#fff; border:1px solid #e1e7ef; border-radius:12px; padding:.7rem .9rem; margin-bottom:.6rem; box-shadow:var(--shadow-sm); transition:.18s; }
+.uf-card:hover{ box-shadow:var(--shadow-md); transform:translateY(-1px); }
+.uf-card .uf-type{ font-size:.72rem; font-weight:800; padding:.2em .55em; border-radius:6px; }
+.uf-type.judicial{ background:#e8f0fe; color:#12335b; }
+.uf-type.professional{ background:#fff4e0; color:#8a6814; }
+.uf-type.legal{ background:#e6f7ee; color:#0f766e; }
+
+/* شبكة أزرار الإجراءات داخل التفاصيل */
+.detail-action-grid{ display:flex; flex-wrap:wrap; gap:.5rem; }
 </style>
 <div class="modal fade" id="teamManagementModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title gold-text">إدارة فريق المكتب</h5></div><div class="modal-body"><label>البريد أو الهاتف</label><input id="teamInviteContact" class="form-control mb-3" placeholder="member@example.com"><label>الدور</label><select id="teamInviteRole" class="form-select mb-3"><option value="lawyer">محامي</option><option value="staff">سكرتيرة</option><option value="accountant">محاسب</option></select><button class="gold-btn w-100" onclick="createDesktopInvite()">إنشاء كود الدعوة</button><div id="teamInviteResult" class="text-center fw-bold mt-3"></div><hr><button class="btn btn-outline-warning w-100" onclick="createDesktopRecoveryCodes()">إنشاء رموز استرداد المالك</button><pre id="teamRecoveryResult" class="mt-3"></pre></div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button></div></div></div></div>
 <script src="renderer.js"></script>

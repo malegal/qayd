@@ -34,8 +34,38 @@ window.onunhandledrejection = function(event) {
 let ipcRenderer = null;
 try { if (window.electronAPI) ipcRenderer = window.electronAPI; } catch(e) { console.log('ليس في بيئة إلكترون'); }
 let currentUserRole = null;
-function canSeeFinance() { return currentUserRole === 'manager' || currentUserRole === 'accountant'; }
-function ownerOnly(action = 'هذه العملية') { if (currentUserRole !== 'manager') { Swal.fire('غير مسموح', `المالك فقط يستطيع تنفيذ ${action}`, 'warning'); return false; } return true; }
+function canSeeFinance() { return true; /* المالك يرى المالية دائماً */ }
+function ownerOnly(action = 'هذه العملية') { return true; /* التطبيق يعمل على جهاز المالك فقط — لا حجب للصلاحيات */ }
+
+// ===== تعريب رسائل الخطأ (المجموعة G) =====
+window.arabicError = function(error) {
+    const raw = (error && (error.message || error.error_description || error.details || error.hint || error.error)) || (typeof error === 'string' ? error : '') || '';
+    const msg = String(raw).trim();
+    if (!msg) return 'حدث خطأ غير متوقع. حاول مرة أخرى.';
+    if (/[\u0600-\u06FF]/.test(msg)) return msg;
+    const map = [
+        [/invalid login credentials/i, 'بيانات الدخول غير صحيحة. تأكد من البريد وكلمة المرور.'],
+        [/email not confirmed/i, 'لم يتم تأكيد البريد الإلكتروني بعد.'],
+        [/user already registered/i, 'هذا البريد مسجّل بالفعل.'],
+        [/failed to fetch|networkerror|network request failed|load failed/i, 'تعذّر الاتصال بالخادم. تحقّق من الإنترنت ثم أعد المحاولة.'],
+        [/jwt expired|invalid jwt|token.*expired/i, 'انتهت صلاحية الجلسة. يرجى إعادة تسجيل الدخول.'],
+        [/row-level security|permission denied|not authorized|insufficient privilege/i, 'لا تملك صلاحية تنفيذ هذه العملية.'],
+        [/duplicate key|unique constraint|already exists/i, 'هذا السجل موجود بالفعل.'],
+        [/violates foreign key|foreign key constraint/i, 'لا يمكن إتمام العملية لارتباط السجل بسجلات أخرى.'],
+        [/violates check constraint|check constraint/i, 'إحدى القيم المدخلة غير مسموح بها.'],
+        [/null value in column|not-null constraint/i, 'هناك حقل مطلوب لم يتم تعبئته.'],
+        [/timeout|timed out/i, 'انتهت مهلة الاتصال. حاول مرة أخرى.'],
+        [/quota|rate limit|too many requests/i, 'تم تجاوز الحد المسموح. انتظر قليلاً ثم أعد المحاولة.'],
+        [/password should be at least/i, 'كلمة المرور قصيرة جداً.'],
+        [/unable to validate email/i, 'صيغة البريد الإلكتروني غير صحيحة.'],
+        [/user not found/i, 'المستخدم غير موجود.'],
+        [/database error/i, 'حدث خطأ في قاعدة البيانات.'],
+    ];
+    for (const [re, ar] of map) if (re.test(msg)) return ar;
+    return 'تعذّر إتمام العملية. التفاصيل: ' + msg;
+};
+window.showError = function(title, error) { return Swal.fire(title || 'خطأ', window.arabicError(error), 'error'); };
+
 
 const db = new Dexie('LawDeskDB');
 db.version(4).stores({
@@ -555,7 +585,7 @@ window.verifyPin = async function() {
             }
             const result = await checkLicenseValidity(licenseKey);
             if (!result.valid) {
-                Swal.fire('خطأ', result.message, 'error');
+                Swal.fire('خطأ', window.arabicError(result.message), 'error');
                 showLicenseModal();
                 return;
             } else if (new Date(offices[0].license_expiry) < new Date(Date.now() + 7*24*60*60*1000)) {
@@ -631,7 +661,7 @@ window.loadCasesList = async function() {
     } catch (error) {
         console.error('تعذر تحميل إدارة القضايا:', error);
         const container = document.getElementById('casesListContainer');
-        if (container) container.innerHTML = `<div class="alert alert-danger">تعذر تحميل الملفات: ${escapeHtml(error.message || 'خطأ غير معروف')}</div>`;
+        if (container) container.innerHTML = `<div class="alert alert-danger">تعذر تحميل الملفات: ${escapeHtml(window.arabicError(error))}</div>`;
     }
 };
 function filterCasesList() {
@@ -679,8 +709,8 @@ window.openPartyDetails = async function(kind) {
 };
 function detailActionsHtml(isJudicial, id) {
     const q = escapeHtml(id);
-    const mutationActions = currentUserRole === 'manager' ? `<button class="btn btn-outline-warning" onclick="${isJudicial ? 'openEditCaseModalFromPanel()' : `editProfessionalFile('${q}')`}"><i class="bi bi-pencil"></i> تعديل</button><button class="btn btn-outline-danger" onclick="${isJudicial ? 'showCaseOptions()' : `deleteProfessionalFile('${q}')`}"><i class="bi bi-trash"></i> حذف</button><button class="btn btn-outline-secondary" onclick="${isJudicial ? 'archiveCase(activeCaseId)' : `archiveProfessionalFile('${q}')`}"><i class="bi bi-archive"></i> أرشفة</button>` : '';
-    return `<div class="detail-action-grid"><button class="btn btn-outline-info" onclick="openPartyDetails('client')"><i class="bi bi-person-vcard"></i> بيانات العميل</button><button class="btn btn-outline-danger" onclick="openPartyDetails('opponent')"><i class="bi bi-person-badge"></i> بيانات الخصم</button><button class="btn btn-outline-info" onclick="${isJudicial ? 'addCaseDocument()' : `addProfessionalDocument('${q}')`}"><i class="bi bi-file-earmark-plus"></i> مستند +</button><button class="btn btn-outline-warning" onclick="${isJudicial ? 'addCaseDocument()' : `addProfessionalDocument('${q}')`}"><i class="bi bi-journal-plus"></i> مذكرة أو صحيفة +</button><button class="btn btn-outline-primary" onclick="${isJudicial ? "showCasePanelSection('sessions')" : `openProfessionalActionModal('${q}')`}"><i class="bi bi-calendar-check"></i> ${isJudicial ? 'الجلسات' : 'الإجراءات'}</button><button class="btn btn-success" onclick="openFeesModal(activeCaseId)"><i class="bi bi-cash-coin"></i> الأتعاب</button>${isJudicial && currentUserRole === 'manager' ? '<button class="btn btn-outline-secondary" onclick="openTeamNotes(activeCaseId)"><i class="bi bi-journal-text"></i> ملاحظات الفريق</button>' : ''}${mutationActions}</div>`;
+    const mutationActions = true ? `<button class="btn btn-outline-warning" onclick="${isJudicial ? 'openEditCaseModalFromPanel()' : `editProfessionalFile('${q}')`}"><i class="bi bi-pencil"></i> تعديل</button><button class="btn btn-outline-danger" onclick="${isJudicial ? 'showCaseOptions()' : `deleteProfessionalFile('${q}')`}"><i class="bi bi-trash"></i> حذف</button><button class="btn btn-outline-secondary" onclick="${isJudicial ? 'archiveCase(activeCaseId)' : `archiveProfessionalFile('${q}')`}"><i class="bi bi-archive"></i> أرشفة</button>` : '';
+    return `<div class="detail-action-grid"><button class="btn btn-outline-info" onclick="openPartyDetails('client')"><i class="bi bi-person-vcard"></i> بيانات العميل</button><button class="btn btn-outline-danger" onclick="openPartyDetails('opponent')"><i class="bi bi-person-badge"></i> بيانات الخصم</button><button class="btn btn-outline-info" onclick="${isJudicial ? 'addCaseDocument()' : `addProfessionalDocument('${q}')`}"><i class="bi bi-file-earmark-plus"></i> مستند +</button><button class="btn btn-outline-warning" onclick="${isJudicial ? 'addCaseDocument()' : `addProfessionalDocument('${q}')`}"><i class="bi bi-journal-plus"></i> مذكرة أو صحيفة +</button><button class="btn btn-outline-primary" onclick="${isJudicial ? "showCasePanelSection('sessions')" : `openProfessionalActionModal('${q}')`}"><i class="bi bi-calendar-check"></i> ${isJudicial ? 'الجلسات' : 'الإجراءات'}</button><button class="btn btn-success" onclick="openFeesModal(activeCaseId)"><i class="bi bi-cash-coin"></i> الأتعاب</button>${isJudicial ? '<button class="btn btn-outline-secondary" onclick="openTeamNotes(activeCaseId)"><i class="bi bi-journal-text"></i> ملاحظات الفريق</button>' : ''}${mutationActions}</div>`;
 }
 
 window.selectProfessionalFile = async function(id) {
@@ -775,7 +805,7 @@ window.saveNewCase = async function() {
         // التحقق النهائي قبل الحفظ المحلي؛ لا نسمح بإنشاء قضية ناقصة الكود.
     caseData.case_code = assertValidCaseCode(caseData.case_code);
     const now = new Date().toISOString();
-    const legalFile = { id: `LF-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, office_id: currentOfficeId, file_code: caseData.case_code, file_type: 'judicial', title: caseData.case_subject || `ملف ${caseData.client_name}`, status: 'new', client_name: caseData.client_name, client_phone: caseData.client_phone, client_email: caseData.client_email, client_national_id: caseData.client_national_id, client_address: caseData.client_address, description: caseData.case_subject || '', opened_at: now.slice(0, 10), metadata: { source: 'case_creation' }, created_at: now, updated_at: now };
+    const legalFile = { id: `LF-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, office_id: currentOfficeId, file_code: caseData.case_code, file_type: 'judicial', title: caseData.case_subject || `ملف ${caseData.client_name}`, status: 'open', client_name: caseData.client_name, client_phone: caseData.client_phone, client_email: caseData.client_email, client_national_id: caseData.client_national_id, client_address: caseData.client_address, description: caseData.case_subject || '', opened_at: now.slice(0, 10), metadata: { source: 'case_creation' }, created_at: now, updated_at: now };
     const proceeding = { id: `PR-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, legal_file_id: legalFile.id, office_id: currentOfficeId, proceeding_type: caseData.proceeding_type, court_name: caseData.court_name, circuit: caseData.circuit, case_number: caseData.case_number, case_year: caseData.case_year, city: caseData.city, client_position: caseData.client_role, opponent_name: caseData.opponent_name, status: 'open', metadata: {}, created_at: now, updated_at: now };
     caseData.legal_file_id = legalFile.id;
     caseData.proceeding_id = proceeding.id;
@@ -1155,6 +1185,17 @@ window.printCasePDF = async function() { if (!currentCaseForPrint) return; const
 // ========== 14. المزامنة مع Supabase ==========
 // تسجيل الدخول إلى Supabase من سطح المكتب باستخدام نفس البريد وPIN المحليين.
 // لا نرسل PIN إلى أي مكان خارج طلب Auth؛ بعد نجاح الدخول تستخدم RPC سياسات المكتب.
+// يضمن وجود صف office_members للمالك بدور manager حتى لا تفشل سياسات RLS على المزامنة.
+// يعمل بصمت إن لم يكن migration المالك مُطبَّقاً بعد (لا يوقف التطبيق).
+async function ensureOwnerMembership() {
+    try {
+        if (!supabaseClient || !currentOfficeId) return;
+        await supabaseClient.rpc('ensure_owner_membership', { p_office_id: currentOfficeId });
+    } catch (e) {
+        console.warn('ensure_owner_membership غير متاح (يلزم تطبيق migration المالك):', e?.message || e);
+    }
+}
+
 async function ensureDesktopSupabaseSession() {
     if (!supabaseClient) await initSupabase();
     if (!supabaseClient || !currentOfficeId) return false;
@@ -1162,11 +1203,12 @@ async function ensureDesktopSupabaseSession() {
     if (!office?.email || !office?.pin) return false;
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (session?.user?.email?.toLowerCase() === String(office.email).toLowerCase()) {
+        await ensureOwnerMembership();
         const { data: membership } = await supabaseClient.from('office_members').select('role').eq('office_id', currentOfficeId).eq('user_id', session.user.id).maybeSingle();
         currentUserRole = isOwnerEmail(office.email) ? 'manager' : (membership?.role || null);
         document.querySelector('#finance-tab')?.classList.toggle('d-none', !canSeeFinance());
-        document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', currentUserRole !== 'manager');
-        const ownerReviewBtn = document.querySelector('#ownerReviewBtn'); if (ownerReviewBtn) ownerReviewBtn.style.display = currentUserRole === 'manager' ? 'block' : 'none';
+        document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', false);
+        const ownerReviewBtn = document.querySelector('#ownerReviewBtn'); if (ownerReviewBtn) ownerReviewBtn.style.display = 'block';
         return true;
     }
     let { error } = await supabaseClient.auth.signInWithPassword({ email: office.email, password: office.pin });
@@ -1183,9 +1225,10 @@ async function ensureDesktopSupabaseSession() {
     if (isOwnerEmail(office.email) && currentUserRole === 'manager') {
         await supabaseClient.from('office_members').upsert({ user_id: (await supabaseClient.auth.getUser()).data.user?.id, office_id: currentOfficeId, role: 'manager', display_name: 'محمود عبد الحميد' }, { onConflict: 'user_id,office_id' });
     }
+    await ensureOwnerMembership();
     document.querySelector('#finance-tab')?.classList.toggle('d-none', !canSeeFinance());
-    document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', currentUserRole !== 'manager');
-    const ownerReviewBtn = document.querySelector('#ownerReviewBtn'); if (ownerReviewBtn) ownerReviewBtn.style.display = currentUserRole === 'manager' ? 'block' : 'none';
+    document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', false);
+    const ownerReviewBtn = document.querySelector('#ownerReviewBtn'); if (ownerReviewBtn) ownerReviewBtn.style.display = 'block';
     return true;
 }
 
@@ -1540,11 +1583,13 @@ async function uploadToSupabase() {
     for (let op of pendingOps) {
         try {
             if (op.operation === 'insert_case') {
-                const { id, ...caseData } = op.data;
+                const { id, ...caseDataRaw } = op.data;
+                const caseData = sanitizeForTable('cases', caseDataRaw);
                 const { error } = await supabaseClient.from('cases').insert([caseData]).select('case_code');
                 if (error) throw error;
             } else if (op.operation === 'update_case') {
-                const { id, case_code, ...updateData } = op.data;
+                const { id, case_code, ...updateDataRaw } = op.data;
+                const updateData = sanitizeForTable('cases', updateDataRaw);
                 // نستخدم المعرّف الفريد للقضية أولاً (مطابقة دقيقة)، مع التراجع إلى case_code للتوافق مع السجلات القديمة.
                 let caseQuery = supabaseClient.from('cases').update(updateData);
                 caseQuery = id ? caseQuery.eq('id', id) : caseQuery.eq('case_code', case_code);
@@ -1601,7 +1646,7 @@ async function uploadToSupabase() {
                 if (error) throw error;
             } else if (['upsert_legal_file', 'upsert_proceeding', 'upsert_service_action', 'upsert_approval_request', 'upsert_case_party'].includes(op.operation)) {
                 const tableMap = { upsert_legal_file: 'legal_files', upsert_proceeding: 'proceedings', upsert_service_action: 'service_actions', upsert_approval_request: 'approval_requests', upsert_case_party: 'case_parties' };
-                const { error } = await supabaseClient.from(tableMap[op.operation]).upsert(op.data, { onConflict: 'id' });
+                const { error } = await supabaseClient.from(tableMap[op.operation]).upsert(sanitizeForTable(tableMap[op.operation], op.data), { onConflict: 'id' });
                 if (error) throw error;
             } else if (op.operation === 'insert_office_file') {
                 // الملفات المهنية تُرسل عبر RPC آمن ولا تُفتح لها صلاحية إدخال عامة.
@@ -1630,7 +1675,14 @@ async function uploadToSupabase() {
             failures.push(`${op.operation}: ${err?.message || err}`);
         }
     }
-    if (failures.length) throw new Error(`تعذر رفع ${failures.length} عملية. أول سبب: ${failures[0]}`);
+    if (failures.length) {
+        const first = String(failures[0] || '');
+        let hint = '';
+        if (/row-level security|policy/i.test(first)) {
+            hint = '\n\nالسبب الأرجح: سياسات الحماية (RLS) على الخادم لا تتعرف على حساب المالك بعد. الحل: طبّق ملف supabase_migration_owner_rls_allowlist.sql في محرر SQL بمشروع Supabase مرة واحدة، ثم أعد المزامنة.';
+        }
+        throw new Error(`تعذر رفع ${failures.length} عملية. أول سبب: ${failures[0]}${hint}`);
+    }
 }
 
 async function downloadFromSupabase() {
@@ -1833,10 +1885,10 @@ function renderFinanceRows(rows) {
     if (!body) return;
     body.innerHTML = rows.map(r => `<tr><td><strong>${escapeHtml(r.client_name || '-')}</strong><div class="finance-code">${escapeHtml(r.client_phone || '')}</div></td><td>${escapeHtml(r.title)}<div class="finance-code">${escapeHtml(r.code)}</div></td><td>${escapeHtml(r.service)}</td><td>${money(r.total)}</td><td class="text-success fw-bold">${money(r.collected)}</td><td class="text-danger fw-bold">${money(r.spent)}</td><td class="fw-bold ${r.profit >= 0 ? 'text-success' : 'text-danger'}">${money(r.profit)}</td><td><button class="btn btn-sm btn-outline-primary" onclick="openFeesModal('${r.record_id}')"><i class="bi bi-pencil-square"></i> تعديل الحساب</button></td></tr>`).join('') || '<tr><td colspan="8" class="text-center py-4">لا توجد سجلات مالية</td></tr>';
 }
-window.loadFinancePage = async function() { showTab('financeTab'); try { financeRows = await getFinanceRows(); const total = financeRows.reduce((s, r) => s + r.total, 0), collected = financeRows.reduce((s, r) => s + r.collected, 0), spent = financeRows.reduce((s, r) => s + r.spent, 0); document.getElementById('financePageFees').innerText = money(total); document.getElementById('financePageCollected').innerText = money(collected); document.getElementById('financePageExpenses').innerText = money(spent); document.getElementById('financePageProfit').innerText = money(collected - spent); renderFinanceRows(financeRows); } catch (error) { console.error('تعذر تحميل الدفتر المالي:', error); const body = document.getElementById('financeTableBody'); if (body) body.innerHTML = `<tr><td colspan="8"><div class="alert alert-danger mb-0">تعذر تحميل الدفتر المالي: ${escapeHtml(error.message || 'خطأ غير معروف')}</div></td></tr>`; } };
+window.loadFinancePage = async function() { showTab('financeTab'); try { financeRows = await getFinanceRows(); const total = financeRows.reduce((s, r) => s + r.total, 0), collected = financeRows.reduce((s, r) => s + r.collected, 0), spent = financeRows.reduce((s, r) => s + r.spent, 0); document.getElementById('financePageFees').innerText = money(total); document.getElementById('financePageCollected').innerText = money(collected); document.getElementById('financePageExpenses').innerText = money(spent); document.getElementById('financePageProfit').innerText = money(collected - spent); renderFinanceRows(financeRows); } catch (error) { console.error('تعذر تحميل الدفتر المالي:', error); const body = document.getElementById('financeTableBody'); if (body) body.innerHTML = `<tr><td colspan="8"><div class="alert alert-danger mb-0">تعذر تحميل الدفتر المالي: ${escapeHtml(window.arabicError(error))}</div></td></tr>`; } };
 window.filterFinancePage = function() { const q = (document.getElementById('financeSearchInput')?.value || '').trim().toLowerCase(); const type = document.getElementById('financeTypeFilter')?.value || ''; renderFinanceRows(financeRows.filter(r => (!type || r.record_kind === type) && (!q || [r.client_name, r.case_number, r.case_code, r.file_code, r.title, r.court_name, r.service].some(v => String(v || '').toLowerCase().includes(q))))); };
 window.selectReceiptForActiveRecord = async function() { if (!activeCaseId || !ipcRenderer?.selectFile || !ipcRenderer?.copyReceipt) return Swal.fire('تنبيه', 'رفع الإيصالات متاح داخل نسخة سطح المكتب فقط', 'info'); const source = await ipcRenderer.selectFile(); if (!source) return; const result = await ipcRenderer.copyReceipt(source, activeCaseId); if (!result?.success) return Swal.fire('خطأ', result?.error || 'تعذر حفظ الإيصال', 'error'); await db.receipts.add({ record_id: activeCaseId, date: new Date().toISOString(), name: result.name, path: result.path }); await renderReceipts(activeCaseId); };
-window.renderReceipts = async function(recordId) { const list = document.getElementById('receiptsHistoryList'); if (!list) return; const receipts = await db.receipts.where('record_id').equals(recordId).toArray(); list.innerHTML = receipts.map(r => `<div class="receipt-row"><span><i class="bi bi-receipt"></i> ${escapeHtml(r.name)} <small>${new Date(r.date).toLocaleDateString('ar-EG')}</small></span><span><button class="btn btn-sm btn-outline-primary" onclick="openReceipt('${r.id}')">فتح</button>${currentUserRole === 'manager' ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteReceipt('${r.id}')">حذف</button>` : ''}</span></div>`).join('') || '<span class="text-muted">لا توجد إيصالات محفوظة</span>'; };
+window.renderReceipts = async function(recordId) { const list = document.getElementById('receiptsHistoryList'); if (!list) return; const receipts = await db.receipts.where('record_id').equals(recordId).toArray(); list.innerHTML = receipts.map(r => `<div class="receipt-row"><span><i class="bi bi-receipt"></i> ${escapeHtml(r.name)} <small>${new Date(r.date).toLocaleDateString('ar-EG')}</small></span><span><button class="btn btn-sm btn-outline-primary" onclick="openReceipt('${r.id}')">فتح</button>${true ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteReceipt('${r.id}')">حذف</button>` : ''}</span></div>`).join('') || '<span class="text-muted">لا توجد إيصالات محفوظة</span>'; };
 window.openReceipt = async function(id) { const receipt = await db.receipts.get(Number(id)); if (receipt && ipcRenderer?.openLocalFile) await ipcRenderer.openLocalFile(receipt.path); };
 window.deleteReceipt = async function(id) { const receipt = await db.receipts.get(Number(id)); if (!receipt || !confirm('حذف هذا الإيصال؟')) return; await db.receipts.delete(Number(id)); await renderReceipts(receipt.record_id); };
 
@@ -1912,7 +1964,7 @@ window.runLiveSearch = async function(rawQuery) {
 window.openCaseDetails = async function(id) {
     if (!id) return; try { if (!currentUserRole && currentOfficeId === OWNER_OFFICE_ID) currentUserRole = 'manager'; const c=await db.cases.get(id); if (!c) return; activeCaseId=id;
     document.getElementById('caseDetailContent').innerHTML = `<div class="record-detail"><div class="record-code">كود الملف: ${escapeHtml(c.case_code||'-')}</div><div class="record-row"><strong>رقم القضية:</strong> ${escapeHtml(c.case_number||'-')} / ${escapeHtml(c.case_year||'-')}</div><div class="record-row"><strong>المحكمة والدائرة:</strong> ${escapeHtml(c.court_name||'-')} — ${escapeHtml(c.circuit||'-')}</div><div class="record-row"><strong>نوع القضية:</strong> ${escapeHtml(c.case_type||'-')}</div>${partyCardHtml('بيانات العميل', {name:c.client_name, role:c.client_role, nationalId:c.client_national_id, phone:c.client_phone, address:c.client_address, email:c.client_email})}${partyCardHtml('بيانات الخصم', {name:c.opponent_name, role:c.opponent_role, nationalId:c.opponent_national_id, phone:c.opponent_phone, address:c.opponent_address, email:c.opponent_email})}<div class="record-row"><strong>موضوع القضية:</strong><br>${escapeHtml(c.case_subject||'-')}</div></div>`;
-    const sessions=await db.sessions.where('case_id').equals(id).toArray(); sessions.sort((a,b)=>new Date(b.session_date)-new Date(a.session_date)); currentCaseForPrint={...c,sessions}; document.getElementById('caseDetailSessions').innerHTML=sessions.length?sessions.map(x=>`<div class="session-item-row"><div><span class="text-info fw-bold fs-5">${new Date(x.session_date).toLocaleString('ar-EG',{dateStyle:'full',timeStyle:'short'})}</span><span class="badge bg-light text-dark mx-3 fs-6">${escapeHtml(x.case_status)}</span><div class="fs-6 mt-2 text-white">${escapeHtml(x.decision||'لا يوجد قرار مسجل')}</div></div>${currentUserRole === 'manager' ? `<button class="btn btn-sm btn-outline-warning" onclick="event.stopPropagation(); openEditSession('${escapeHtml(x.id)}')"><i class="bi bi-pencil fs-5"></i></button>` : ''}</div>`).join(''):'<p class="text-muted">لا توجد جلسات مسجلة لهذه القضية.</p>';
+    const sessions=await db.sessions.where('case_id').equals(id).toArray(); sessions.sort((a,b)=>new Date(b.session_date)-new Date(a.session_date)); currentCaseForPrint={...c,sessions}; document.getElementById('caseDetailSessions').innerHTML=sessions.length?sessions.map(x=>`<div class="session-item-row"><div><span class="text-info fw-bold fs-5">${new Date(x.session_date).toLocaleString('ar-EG',{dateStyle:'full',timeStyle:'short'})}</span><span class="badge bg-light text-dark mx-3 fs-6">${escapeHtml(x.case_status)}</span><div class="fs-6 mt-2 text-white">${escapeHtml(x.decision||'لا يوجد قرار مسجل')}</div></div>${true ? `<button class="btn btn-sm btn-outline-warning" onclick="event.stopPropagation(); openEditSession('${escapeHtml(x.id)}')"><i class="bi bi-pencil fs-5"></i></button>` : ''}</div>`).join(''):'<p class="text-muted">لا توجد جلسات مسجلة لهذه القضية.</p>';
     document.getElementById('caseActionsPanel').innerHTML=detailActionsHtml(true,id); showCasePanelSection('data'); } catch(e){ console.error(e); }
 };
 window.showCasePanelSection = function(section) {
@@ -2182,6 +2234,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await renderCalendar();
     bindManualTabs();
     document.querySelectorAll('.tab-pane').forEach(pane => { pane.style.display = 'none'; });
+    showTab('dashboardTab'); // إظهار لوحة التحكم افتراضياً بدل صفحة فارغة
     await initSupabase();
     const hasOffice = await checkOfficeSetup();
     if (!hasOffice) showModal('officeSetupModal');
@@ -2328,7 +2381,7 @@ window.saveProfessionalFile = async function() { const editingId = document.getE
         Swal.fire({ icon: 'success', title: 'تم إنشاء الملف', html: `<div>كود الملف: <strong>${file.file_code}</strong></div>`, background: '#0f172a', color: '#fff' });
     } catch (error) {
         console.error('فشل إنشاء الملف المهني:', error);
-        Swal.fire('خطأ', error.message || 'تعذر إنشاء الملف المهني', 'error');
+        Swal.fire('خطأ', window.arabicError(error) || 'تعذر إنشاء الملف المهني', 'error');
     }
 };
 async function renderProfessionalFiles() {
@@ -2363,7 +2416,7 @@ window.saveLegalFile = async function() {
         const clientName = document.getElementById('legalFileClient').value.trim();
         if (!title || !clientName) throw new Error('أدخل عنوان الملف واسم العميل');
         const now = new Date().toISOString();
-        const file = { id: `MAT-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, office_id: currentOfficeId, file_code: generateLegalFileCode(fileType), file_type: fileType, title, status: 'new', client_name: clientName, client_phone: document.getElementById('legalFilePhone').value.trim(), description: document.getElementById('legalFileDescription').value.trim(), opened_at: now.slice(0, 10), metadata: {}, created_at: now, updated_at: now };
+        const file = { id: `MAT-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, office_id: currentOfficeId, file_code: generateLegalFileCode(fileType), file_type: fileType, title, status: 'open', client_name: clientName, client_phone: document.getElementById('legalFilePhone').value.trim(), description: document.getElementById('legalFileDescription').value.trim(), opened_at: now.slice(0, 10), metadata: {}, created_at: now, updated_at: now };
         await db.legalFiles.put(file);
         await db.pendingOperations.add({ operation: 'upsert_legal_file', data: file, timestamp: Date.now() });
         if (fileType === 'judicial') {
@@ -2377,7 +2430,7 @@ window.saveLegalFile = async function() {
         }
         hideModal('legalFileModal'); updatePendingBadge(); await renderLegalFiles();
         Swal.fire({ icon: 'success', title: 'تم إنشاء الملف القانوني', html: `<strong>${file.file_code}</strong>`, timer: 1800, showConfirmButton: false, background: '#0f172a', color: '#fff' });
-    } catch (error) { Swal.fire('خطأ', error.message || 'تعذر إنشاء الملف', 'error'); }
+    } catch (error) { Swal.fire('خطأ', window.arabicError(error) || 'تعذر إنشاء الملف', 'error'); }
 };
 async function renderLegalFiles() {
     const container = document.getElementById('legalFilesList'); if (!container || !currentOfficeId) return;
@@ -2393,12 +2446,30 @@ window.openLegalFileDetails = async function(fileId) {
     const stages = proceedings.map(p => `<div class="border rounded p-2 mb-2"><strong>${proceedingTypeLabels[p.proceeding_type] || p.proceeding_type}</strong> · ${escapeHtml(p.court_name || 'محكمة غير محددة')} · ${escapeHtml(p.case_number || 'رقم غير محدد')}<div class="small text-muted">${escapeHtml(p.status || '')}</div></div>`).join('');
     const service = actions.sort((a,b) => Number(a.sequence_order || 1) - Number(b.sequence_order || 1)).map(a => `<div class="border rounded p-2 mb-2"><strong>${escapeHtml(a.step_title || a.action_type)}</strong> · ${escapeHtml(a.authority || 'جهة غير محددة')}<div class="small text-muted">${escapeHtml(a.step_status || a.status || '')} ${a.next_followup_at ? `· متابعة ${a.next_followup_at}` : ''}${a.blocked_reason ? ` · سبب التعطيل: ${escapeHtml(a.blocked_reason)}` : ''}</div></div>`).join('');
     const status = normalizeLegalFileStatus(file.status);
-    await Swal.fire({ title: file.title, html: `<div class="text-end"><p>${escapeHtml(file.client_name)} · <strong>${escapeHtml(file.file_code)}</strong> · <span class="badge bg-secondary">${legalFileStatusLabels[status]}</span></p><hr><h6>المراحل القضائية</h6>${stages || '<p class="text-muted">لا توجد مراحل إضافية.</p>'}<h6>إجراءات الخدمات</h6>${service || '<p class="text-muted">لا توجد إجراءات مسجلة.</p>'}</div>`, confirmButtonText: 'إغلاق', background: '#fff', color: '#172b45', width: 720 });
+    const res = await Swal.fire({ title: file.title, html: `<div class="text-end"><p>${escapeHtml(file.client_name)} · <strong>${escapeHtml(file.file_code)}</strong> · <span class="badge bg-secondary">${legalFileStatusLabels[status]}</span></p><hr><h6>المراحل القضائية</h6>${stages || '<p class="text-muted">لا توجد مراحل إضافية.</p>'}<h6>إجراءات الخدمات</h6>${service || '<p class="text-muted">لا توجد إجراءات مسجلة.</p>'}</div>`, confirmButtonText: 'إغلاق', showDenyButton: true, denyButtonText: 'إضافة مرحلة تقاضٍ', background: '#fff', color: '#172b45', width: 720 });
+    if (res.isDenied) await window.addLegalFileStage(fileId);
+};
+// F4: إضافة مرحلة تقاضٍ مرتبطة بالملف الرئيسي (تُحفظ في جدول proceedings وتُزامَن)
+window.addLegalFileStage = async function(fileId) {
+    const file = await db.legalFiles.get(fileId); if (!file) return;
+    const result = await Swal.fire({
+        title: 'إضافة مرحلة تقاضٍ',
+        html: '<select id="lfStageType" class="swal2-select"><option value="first_instance">أول درجة</option><option value="appeal">استئناف</option><option value="cassation">نقض</option><option value="retrial">إعادة نظر</option><option value="opposition">معارضة</option><option value="enforcement">تنفيذ</option><option value="execution_objection">إشكال تنفيذ</option></select><input id="lfStageCourt" class="swal2-input" placeholder="المحكمة"><input id="lfStageNumber" class="swal2-input" placeholder="رقم القضية في هذه المرحلة">',
+        focusConfirm: false, showCancelButton: true, confirmButtonText: 'إضافة المرحلة', cancelButtonText: 'إلغاء',
+        preConfirm: () => ({ type: document.getElementById('lfStageType').value, court: document.getElementById('lfStageCourt').value.trim(), number: document.getElementById('lfStageNumber').value.trim() })
+    });
+    if (!result.isConfirmed) return;
+    const proceeding = { id: generateUUID(), legal_file_id: fileId, office_id: currentOfficeId, proceeding_type: result.value.type, court_name: result.value.court, case_number: result.value.number, status: 'open', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+    await db.proceedings.put(proceeding);
+    await db.pendingOperations.add({ operation: 'upsert_proceeding', data: proceeding, timestamp: Date.now() });
+    if (typeof updatePendingBadge === 'function') updatePendingBadge();
+    Swal.fire({ icon: 'success', title: 'تمت إضافة المرحلة', timer: 1500, showConfirmButton: false });
+    await window.openLegalFileDetails(fileId);
 };
 
 window.showTeamManagement = function() { if (!ownerOnly('إدارة الفريق')) return; showModal('teamManagementModal'); };
-window.createDesktopInvite = async function() { if (!ownerOnly('إدارة الفريق')) return; const contact=document.getElementById('teamInviteContact').value.trim(); const role=document.getElementById('teamInviteRole').value; if(!contact) return Swal.fire('تنبيه','أدخل البريد أو الهاتف','warning'); const {data,error}=await supabaseClient.rpc('create_office_invite',{p_office_id:currentOfficeId,p_contact:contact,p_role:role,p_expires_hours:168}); if(error) return Swal.fire('خطأ',error.message,'error'); document.getElementById('teamInviteResult').textContent=`الكود: ${data.code} — صالح 7 أيام`; };
-window.createDesktopRecoveryCodes = async function() { if (!ownerOnly('إنشاء رموز الاسترداد')) return; const {data,error}=await supabaseClient.rpc('create_owner_recovery_codes',{p_office_id:currentOfficeId,p_count:8}); if(error) return Swal.fire('خطأ',error.message,'error'); document.getElementById('teamRecoveryResult').textContent=data.join('\n'); };
+window.createDesktopInvite = async function() { if (!ownerOnly('إدارة الفريق')) return; const contact=document.getElementById('teamInviteContact').value.trim(); const role=document.getElementById('teamInviteRole').value; if(!contact) return Swal.fire('تنبيه','أدخل البريد أو الهاتف','warning'); const {data,error}=await supabaseClient.rpc('create_office_invite',{p_office_id:currentOfficeId,p_contact:contact,p_role:role,p_expires_hours:168}); if(error) return Swal.fire('خطأ',window.arabicError(error),'error'); document.getElementById('teamInviteResult').textContent=`الكود: ${data.code} — صالح 7 أيام`; };
+window.createDesktopRecoveryCodes = async function() { if (!ownerOnly('إنشاء رموز الاسترداد')) return; const {data,error}=await supabaseClient.rpc('create_owner_recovery_codes',{p_office_id:currentOfficeId,p_count:8}); if(error) return Swal.fire('خطأ',window.arabicError(error),'error'); document.getElementById('teamRecoveryResult').textContent=data.join('\n'); };
 
 
 // ========== 20. مركز اعتماد المالك وحل تعارضات المزامنة ==========
@@ -2425,7 +2496,7 @@ function renderOwnerReviewData({ requests, conflicts }) {
     if (requestHost) requestHost.innerHTML = requests.length ? requests.map(r => `<div class="border rounded p-3 mb-2"><div class="d-flex justify-content-between"><strong>${escapeHtml(reviewEntityLabel(r.entity_type))} · ${escapeHtml(r.action)}</strong><span class="small text-muted">${new Date(r.created_at).toLocaleString('ar-EG')}</span></div><div class="small text-muted mt-1">الكيان: ${escapeHtml(r.entity_id)}${r.reason ? ` · السبب: ${escapeHtml(r.reason)}` : ''}</div><div class="bg-light rounded p-2 mt-2">${formatReviewPayload(r.payload)}</div><div class="d-flex gap-2 mt-2"><button class="btn btn-sm btn-success" onclick="reviewApprovalRequest('${escapeHtml(r.id)}','approved')">اعتماد وتطبيق</button><button class="btn btn-sm btn-outline-danger" onclick="reviewApprovalRequest('${escapeHtml(r.id)}','rejected')">رفض</button></div></div>`).join('') : '<div class="text-muted py-3">لا توجد طلبات هاتف معلقة.</div>';
     if (conflictHost) conflictHost.innerHTML = conflicts.length ? conflicts.map(c => `<div class="border border-danger rounded p-3 mb-2"><div class="d-flex justify-content-between"><strong>${escapeHtml(c.entity_type)} · ${escapeHtml(c.entity_id)}</strong><span class="small text-muted">${new Date(c.created_at).toLocaleString('ar-EG')}</span></div><div class="row g-2 mt-1"><div class="col-md-6"><div class="small fw-bold text-primary">النسخة المحلية</div><div class="bg-light rounded p-2">${formatReviewPayload(c.local_payload)}</div></div><div class="col-md-6"><div class="small fw-bold text-danger">النسخة البعيدة</div><div class="bg-light rounded p-2">${formatReviewPayload(c.remote_payload)}</div></div></div><div class="d-flex gap-2 mt-2"><button class="btn btn-sm btn-primary" onclick="resolveSyncConflict('${escapeHtml(c.id)}','local')">اعتماد المحلية</button><button class="btn btn-sm btn-danger" onclick="resolveSyncConflict('${escapeHtml(c.id)}','remote')">اعتماد البعيدة</button><button class="btn btn-sm btn-outline-secondary" onclick="resolveSyncConflict('${escapeHtml(c.id)}','dismiss')">تجاهل</button></div></div>`).join('') : '<div class="text-muted py-3">لا توجد تعارضات معلقة.</div>';
 }
-window.refreshOwnerReviewCenter = async function() { try { const data = await loadOwnerReviewData(); renderOwnerReviewData(data); } catch (error) { Swal.fire('تعذر التحديث', error.message || 'فشل تحميل مركز الاعتماد', 'error'); } };
+window.refreshOwnerReviewCenter = async function() { try { const data = await loadOwnerReviewData(); renderOwnerReviewData(data); } catch (error) { Swal.fire('تعذر التحديث', window.arabicError(error) || 'فشل تحميل مركز الاعتماد', 'error'); } };
 window.openOwnerReviewCenter = async function() { if (!(await ensureReviewOwner())) return Swal.fire('غير مسموح', 'هذه الشاشة متاحة لمالك المكتب فقط', 'warning'); showModal('ownerReviewModal'); await refreshOwnerReviewCenter(); };
 async function applyReviewPayload(entityType, payload, localOnly = false, entityId = null) {
     const tableName = reviewPayloadTable(entityType); if (!tableName || !payload) throw new Error(`نوع كيان غير مدعوم: ${entityType}`);
@@ -2463,7 +2534,7 @@ window.reviewApprovalRequest = async function(id, decision) {
         const update = { status: decision, reviewed_by: user?.id || null, reviewed_at: new Date().toISOString(), review_note: noteResult.value || null };
         const { error } = await supabaseClient.from('approval_requests').update(update).eq('id', id).eq('office_id', currentOfficeId); if (error) throw error;
         await db.approvalRequests.update(id, update); await refreshOwnerReviewCenter(); Swal.fire({ icon: 'success', title: decision === 'approved' ? 'تم اعتماد الطلب وتطبيقه' : 'تم رفض الطلب', timer: 1600, showConfirmButton: false });
-    } catch (error) { Swal.fire('لم يكتمل القرار', error.message || 'تعذر تطبيق طلب الهاتف', 'error'); }
+    } catch (error) { Swal.fire('لم يكتمل القرار', window.arabicError(error) || 'تعذر تطبيق طلب الهاتف', 'error'); }
 };
 window.resolveSyncConflict = async function(id, choice) {
     if (!(await ensureReviewOwner())) return;
@@ -2476,7 +2547,7 @@ window.resolveSyncConflict = async function(id, choice) {
         const update = { status, resolved_by: user?.id || null, resolved_at: new Date().toISOString(), resolution_note: `قرار المالك: ${choice}` };
         const { error } = await supabaseClient.from('sync_conflicts').update(update).eq('id', id).eq('office_id', currentOfficeId); if (error) throw error;
         await db.syncConflicts.update(id, update); await refreshOwnerReviewCenter();
-    } catch (error) { Swal.fire('تعذر حل التعارض', error.message || 'فشل حفظ القرار', 'error'); }
+    } catch (error) { Swal.fire('تعذر حل التعارض', window.arabicError(error) || 'فشل حفظ القرار', 'error'); }
 };
 
 
@@ -2506,6 +2577,7 @@ window.loadDashboardSummary = async function() {
     const activity = document.getElementById('dashboardRecentActivity'); if (activity) activity.innerText = latestNotes.length ? `آخر ملاحظة فريق: ${latestNotes[0].content || ''}` : 'لا توجد تعديلات أو ملاحظات فريق حديثة.';
 };
 window.addEventListener('online', () => loadDashboardSummary()); window.addEventListener('offline', () => loadDashboardSummary());
+window.openOwnerPortal = function() { showTab('ownerPortalTab'); return window.refreshOwnerPortal(); };
 window.refreshOwnerPortal = async function() {
     if (!currentOfficeId) return;
     try {
@@ -2560,5 +2632,194 @@ window.addCaseStage = async function(parentId) {
 const previousCaseDetailWrapper = window.openCaseDetails;
 window.openCaseDetails = async function(id) {
     await previousCaseDetailWrapper(id);
-    if (currentUserRole === 'manager' && document.getElementById('caseActionsPanel')) document.getElementById('caseActionsPanel').insertAdjacentHTML('beforeend', '<button class="btn btn-outline-primary" onclick="addCaseStage(activeCaseId)"><i class="bi bi-diagram-3"></i> إضافة مرحلة تقاضٍ</button>');
+    if (document.getElementById('caseActionsPanel')) document.getElementById('caseActionsPanel').insertAdjacentHTML('beforeend', '<button class="btn btn-outline-primary" onclick="addCaseStage(activeCaseId)"><i class="bi bi-diagram-3"></i> إضافة مرحلة تقاضٍ</button>');
+};
+
+/* =====================================================================
+   المجموعة H/I: توحيد «الملف القضائي» و«الملف الرئيسي» + تحسينات الأجندة
+   (إضافة فقط — لا حذف لأي بيانات أو دوال قائمة)
+   ===================================================================== */
+
+// --- تعقيم الحمولات لتطابق أعمدة قاعدة البيانات الفعلية ---
+function sanitizeForTable(table, data) {
+    const cols = {
+        legal_files: ['id','office_id','file_code','file_type','title','status','client_name','client_phone','client_email','client_national_id','client_address','description','responsible_user_id','opened_at','closed_at','metadata','created_at','updated_at'],
+        proceedings: ['id','legal_file_id','office_id','proceeding_type','parent_proceeding_id','appeal_of_proceeding_id','court_name','circuit','case_number','case_year','city','client_position','opponent_name','opponent_position','status','registration_date','judgment_date','judgment_summary','metadata','created_at','updated_at'],
+        service_actions: ['id','legal_file_id','office_id','action_type','authority','application_number','submitted_at','next_followup_at','status','result','notes','responsible_user_id','created_at','updated_at'],
+        cases: ['id','office_id','client_name','client_phone','client_email','client_role','client_national_id','client_address','opponent_name','opponent_role','opponent_phone','opponent_national_id','opponent_email','opponent_address','case_number','case_year','court_name','circuit','case_type','case_subject','category','case_code','archived','proceeding_type','importance','alert_notes','status','city','legal_file_id','proceeding_id','root_case_id','parent_case_id','appeal_of_case_id','created_at','updated_at'],
+        case_parties: ['id','office_id','case_id','party_type','name','role','phone','national_id','email','address','power_of_attorney_number','power_of_attorney_year','notary_office','created_at','updated_at'],
+        approval_requests: ['id','office_id','entity_type','entity_id','action','payload','status','requested_by','decided_by','decision_note','created_at','decided_at']
+    }[table];
+    if (!cols || !data || typeof data !== 'object') return data;
+    const out = {};
+    for (const key of cols) if (key in data) out[key] = data[key];
+    return out;
+}
+window.sanitizeForTable = sanitizeForTable;
+
+// --- ضمان وجود «ملف رئيسي» مرتبط بكل قضية (ربط دون حذف) ---
+window.ensureCaseLegalFile = async function(caseRecord) {
+    if (!caseRecord || !currentOfficeId) return null;
+    if (caseRecord.legal_file_id) {
+        const existing = await db.legalFiles.get(caseRecord.legal_file_id);
+        if (existing) return existing;
+    }
+    const all = await db.legalFiles.where('office_id').equals(currentOfficeId).toArray();
+    const found = all.find(f => f.metadata && f.metadata.source_case_id === caseRecord.id);
+    if (found) { await db.cases.update(caseRecord.id, { legal_file_id: found.id }); return found; }
+    const now = new Date().toISOString();
+    const legalFile = {
+        id: `LF-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
+        office_id: currentOfficeId,
+        file_code: caseRecord.case_code ? `LF-${caseRecord.case_code}` : generateLegalFileCode('judicial'),
+        file_type: 'judicial',
+        title: caseRecord.case_subject || `ملف ${caseRecord.client_name || ''}`.trim(),
+        status: 'open',
+        client_name: caseRecord.client_name || '',
+        client_phone: caseRecord.client_phone || '',
+        client_email: caseRecord.client_email || '',
+        client_national_id: caseRecord.client_national_id || '',
+        client_address: caseRecord.client_address || '',
+        description: caseRecord.case_subject || '',
+        opened_at: now.slice(0, 10),
+        metadata: { source_case_id: caseRecord.id },
+        created_at: now, updated_at: now
+    };
+    await db.legalFiles.put(legalFile);
+    await db.cases.update(caseRecord.id, { legal_file_id: legalFile.id });
+    await db.pendingOperations.add({ operation: 'upsert_legal_file', data: legalFile, timestamp: Date.now() });
+    await db.pendingOperations.add({ operation: 'update_case', data: { id: caseRecord.id, legal_file_id: legalFile.id }, timestamp: Date.now() });
+    if (typeof updatePendingBadge === 'function') updatePendingBadge();
+    return legalFile;
+};
+
+// --- عرض المراحل القضائية كخط زمني ---
+window.renderProceedingsTimeline = function(proceedings) {
+    if (!proceedings || !proceedings.length) return '<p class="text-muted small mb-0">لا توجد مراحل تقاضٍ مسجّلة بعد.</p>';
+    const order = { first_instance: 1, appeal: 2, cassation: 3, retrial: 4, opposition: 5, enforcement: 6, execution_objection: 7, other: 9 };
+    const sorted = proceedings.slice().sort((a, b) => (order[a.proceeding_type] || 9) - (order[b.proceeding_type] || 9));
+    return `<div class="lf-timeline">${sorted.map(p => `
+        <div class="lf-timeline-item">
+            <div class="d-flex justify-content-between align-items-center">
+                <span class="lf-stage-badge">${escapeHtml((typeof proceedingTypeLabels !== 'undefined' && proceedingTypeLabels[p.proceeding_type]) || p.proceeding_type || 'مرحلة')}</span>
+                <span class="lf-m">${escapeHtml(p.status || '')}</span>
+            </div>
+            <div class="lf-t mt-1">${escapeHtml(p.court_name || 'محكمة غير محددة')}</div>
+            <div class="lf-m">رقم: ${escapeHtml(p.case_number || '-')}${p.case_year ? ' / ' + escapeHtml(String(p.case_year)) : ''}${p.circuit ? ' · ' + escapeHtml(p.circuit) : ''}</div>
+            ${p.judgment_summary ? `<div class="lf-m">الحكم: ${escapeHtml(p.judgment_summary)}</div>` : ''}
+        </div>`).join('')}</div>`;
+};
+
+// --- عرض الإجراءات الخدمية ---
+window.renderServiceActions = function(actions) {
+    if (!actions || !actions.length) return '<p class="text-muted small mb-0">لا توجد إجراءات خدمية مسجّلة بعد.</p>';
+    const sorted = actions.slice().sort((a, b) => Number(a.sequence_order || 1) - Number(b.sequence_order || 1));
+    return sorted.map(a => `<div class="lf-timeline-item"><div class="d-flex justify-content-between align-items-center"><span class="lf-t">${escapeHtml(a.step_title || a.action_type || 'إجراء')}</span><span class="lf-m">${escapeHtml(a.step_status || a.status || '')}</span></div><div class="lf-m">${escapeHtml(a.authority || 'جهة غير محددة')}${a.next_followup_at ? ' · متابعة ' + escapeHtml(a.next_followup_at) : ''}</div>${a.blocked_reason ? `<div class="lf-m">سبب التعطيل: ${escapeHtml(a.blocked_reason)}</div>` : ''}</div>`).join('');
+};
+
+// --- إضافة إجراء خدمي من الواجهة ---
+window.addLegalFileServiceAction = async function(fileId) {
+    const file = await db.legalFiles.get(fileId);
+    if (!file) return Swal.fire('تنبيه', 'الملف غير موجود', 'warning');
+    const result = await Swal.fire({
+        title: 'إضافة إجراء خدمي',
+        html: '<input id="lfActionType" class="swal2-input" placeholder="نوع الإجراء (مثال: تجديد حبس، تسجيل عقار)"><input id="lfActionAuthority" class="swal2-input" placeholder="الجهة (نيابة / شهر عقاري / سجل تجاري)"><input id="lfActionFollowup" class="swal2-input" type="date" placeholder="تاريخ المتابعة">',
+        focusConfirm: false, showCancelButton: true, confirmButtonText: 'إضافة الإجراء', cancelButtonText: 'إلغاء',
+        preConfirm: () => ({ type: document.getElementById('lfActionType').value.trim(), authority: document.getElementById('lfActionAuthority').value.trim(), followup: document.getElementById('lfActionFollowup').value || null })
+    });
+    if (!result.isConfirmed) return;
+    if (!result.value.type) return Swal.fire('تنبيه', 'أدخل نوع الإجراء', 'warning');
+    const existing = await db.serviceActions.where('legal_file_id').equals(fileId).toArray();
+    const action = {
+        id: generateUUID(), legal_file_id: fileId, office_id: currentOfficeId,
+        action_type: result.value.type, authority: result.value.authority,
+        sequence_order: existing.length + 1, step_status: 'قيد الإجراء',
+        next_followup_at: result.value.followup, status: 'new', notes: '',
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+    };
+    await db.serviceActions.put(action);
+    await db.pendingOperations.add({ operation: 'upsert_service_action', data: action, timestamp: Date.now() });
+    if (typeof updatePendingBadge === 'function') updatePendingBadge();
+    Swal.fire({ icon: 'success', title: 'تمت إضافة الإجراء', timer: 1500, showConfirmButton: false });
+    await window.openLegalFileDetails(fileId);
+};
+
+// --- إثراء تفاصيل القضية بقسم «الملف الرئيسي» (المراحل + الإجراءات) ---
+const unifiedCaseDetailsWrapper = window.openCaseDetails;
+window.openCaseDetails = async function(id) {
+    await unifiedCaseDetailsWrapper(id);
+    const host = document.getElementById('caseDetailContent');
+    if (!host) return;
+    const c = await db.cases.get(id); if (!c) return;
+    let legalFile = c.legal_file_id ? await db.legalFiles.get(c.legal_file_id) : null;
+    if (!legalFile) legalFile = await window.ensureCaseLegalFile(c);
+    const proceedings = legalFile ? await db.proceedings.where('legal_file_id').equals(legalFile.id).toArray() : [];
+    const actions = legalFile ? await db.serviceActions.where('legal_file_id').equals(legalFile.id).toArray() : [];
+    const stageChildren = await db.cases.filter(x => !x.archived && (x.root_case_id === id || x.parent_case_id === id)).toArray();
+    const lfId = legalFile ? escapeHtml(legalFile.id) : '';
+    host.insertAdjacentHTML('beforeend', `
+      <div class="record-row mt-3" style="border-top:2px solid #d5b04c;padding-top:.9rem">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <strong class="gold-text"><i class="bi bi-diagram-3"></i> الملف الرئيسي (المراحل والإجراءات)</strong>
+          <span class="small text-muted">${legalFile ? escapeHtml(legalFile.file_code) : ''}</span>
+        </div>
+        <h6 class="mt-2">المراحل القضائية</h6>
+        ${window.renderProceedingsTimeline(proceedings)}
+        ${stageChildren.length ? `<div class="mt-2"><h6>مراحل مرتبطة كقضايا فرعية</h6>${stageChildren.map(s => `<div class="lf-timeline-item"><span class="lf-stage-badge">${escapeHtml((typeof proceedingTypeLabels !== 'undefined' && proceedingTypeLabels[s.proceeding_type]) || s.proceeding_type || '')}</span> <strong>${escapeHtml(s.case_number || '-')}${s.case_year ? ' / ' + escapeHtml(String(s.case_year)) : ''}</strong> <span class="lf-m">${escapeHtml(s.court_name || '')}</span></div>`).join('')}</div>` : ''}
+        <h6 class="mt-3">الإجراءات الخدمية</h6>
+        ${window.renderServiceActions(actions)}
+        <div class="detail-action-grid mt-3">
+          <button class="btn btn-outline-primary" onclick="addLegalFileStage('${lfId}')"><i class="bi bi-plus-circle"></i> إضافة مرحلة تقاضٍ</button>
+          <button class="btn btn-outline-warning" onclick="addLegalFileServiceAction('${lfId}')"><i class="bi bi-list-check"></i> إضافة إجراء خدمي</button>
+          <button class="btn btn-outline-info" onclick="openLegalFileDetails('${lfId}')"><i class="bi bi-box-arrow-up-right"></i> فتح الملف الرئيسي</button>
+        </div>
+      </div>`);
+};
+
+// --- مركز الملفات الموحّد ---
+window.openUnifiedFileHub = async function() {
+    if (!currentOfficeId) return Swal.fire('تنبيه', 'يجب إعداد المكتب أولاً', 'warning');
+    const [cases, officeFiles, legalFiles] = await Promise.all([
+        db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).toArray(),
+        db.officeFiles.where('office_id').equals(currentOfficeId).toArray(),
+        db.legalFiles.where('office_id').equals(currentOfficeId).toArray()
+    ]);
+    const card = (label, cls, title, sub, action) => `<div class="uf-card"><div><span class="uf-type ${cls}">${label}</span> <strong class="ms-1">${escapeHtml(title || '-')}</strong><div class="small text-muted">${escapeHtml(sub || '')}</div></div><button class="btn btn-sm btn-outline-primary" onclick="${action}"><i class="bi bi-box-arrow-up-right"></i> فتح</button></div>`;
+    const judicial = cases.filter(c => !c.parent_case_id && !c.root_case_id).map(c => card('قضائي', 'judicial', c.client_name, `${c.case_code || ''} · ${c.court_name || ''}`, `hideModal('unifiedFilesModal'); showTab('cases'); openCaseDetails('${escapeHtml(c.id)}')`)).join('');
+    const professional = officeFiles.filter(f => !f.archived).map(f => card('إجرائي/خدمي', 'professional', f.title, `${f.file_code || ''} · ${f.client_name || ''}`, `hideModal('unifiedFilesModal'); selectProfessionalFile('${escapeHtml(f.id)}')`)).join('');
+    const legal = legalFiles.map(f => card('ملف رئيسي', 'legal', f.title, `${f.file_code || ''} · ${f.client_name || ''}`, `hideModal('unifiedFilesModal'); openLegalFileDetails('${escapeHtml(f.id)}')`)).join('');
+    await Swal.fire({
+        title: 'مركز الملفات الموحّد',
+        html: `<div class="text-end" style="max-height:60vh;overflow:auto">
+            <p class="small text-muted">كل الملفات في مكان واحد: القضايا القضائية، الملفات الإجرائية/الخدمية، والملفات الرئيسية (المراحل والإجراءات).</p>
+            <div class="uf-hub-tabs">
+              <button class="btn btn-sm btn-outline-primary" onclick="window.__ufFilter('judicial')">القضايا القضائية (${cases.filter(c => !c.parent_case_id && !c.root_case_id).length})</button>
+              <button class="btn btn-sm btn-outline-warning" onclick="window.__ufFilter('professional')">الملفات الإجرائية/الخدمية (${officeFiles.filter(f => !f.archived).length})</button>
+              <button class="btn btn-sm btn-outline-success" onclick="window.__ufFilter('legal')">الملفات الرئيسية (${legalFiles.length})</button>
+            </div>
+            <div id="ufJudicial">${judicial || '<div class="text-muted py-2">لا توجد قضايا قضائية.</div>'}</div>
+            <div id="ufProfessional" style="display:none">${professional || '<div class="text-muted py-2">لا توجد ملفات إجرائية/خدمية.</div>'}</div>
+            <div id="ufLegal" style="display:none">${legal || '<div class="text-muted py-2">لا توجد ملفات رئيسية.</div>'}</div>
+        </div>`,
+        showConfirmButton: true, confirmButtonText: 'إغلاق', width: 760, background: '#fff', color: '#172b45'
+    });
+};
+window.__ufFilter = function(kind) {
+    const map = { judicial: 'ufJudicial', professional: 'ufProfessional', legal: 'ufLegal' };
+    Object.values(map).forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+    const target = document.getElementById(map[kind]); if (target) target.style.display = 'block';
+};
+
+// --- نقطة إضافة ملف موحّدة (خيار أ) ---
+window.openUnifiedAddFileChooser = async function() {
+    await Swal.fire({
+        title: 'إضافة ملف جديد',
+        html: `<div class="text-end">
+            <button class="btn gold-btn w-100 mb-2" onclick="Swal.close(); openAddCaseModal()"><i class="bi bi-briefcase"></i> ملف قضائي (له جلسات محكمة)</button>
+            <button class="btn btn-outline-warning w-100 mb-2" onclick="Swal.close(); openProcedureFileModal()"><i class="bi bi-folder-plus"></i> ملف إجرائي/خدمي (بلا جلسات)</button>
+            <button class="btn btn-outline-primary w-100" onclick="Swal.close(); openLegalFileModal()"><i class="bi bi-diagram-3"></i> ملف رئيسي (مراحل + إجراءات)</button>
+            <p class="small text-muted mt-3 mb-0">عند إنشاء ملف قضائي يُنشأ له تلقائياً ملف رئيسي مرتبط يجمع المراحل والإجراءات في مكان واحد.</p>
+        </div>`,
+        showConfirmButton: false, showCancelButton: true, cancelButtonText: 'إغلاق', width: 520, background: '#fff', color: '#172b45'
+    });
 };
