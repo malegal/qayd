@@ -82,6 +82,7 @@ begin
     select 1 from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and p.proname = 'is_office_member'
+      and pg_get_function_identity_arguments(p.oid) = 'text'
   ) then
     execute $fn$
       create or replace function public.is_office_member(p_office_id text)
