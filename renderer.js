@@ -111,11 +111,16 @@ db.version(12).stores({
 db.version(13).stores({
     events: '++id, office_id, remote_id, title, date, type'
 });
+// مراحل القضية تاريخية داخل نفس الملف، ولا تنشئ قضية أو كوداً أو مجلداً جديداً.
+db.version(14).stores({
+    caseStages: 'id, case_id, office_id, stage_type, case_number, case_year, created_at',
+    sessions: 'id, office_id, case_id, stage_id, session_date, case_status, decision'
+});
 
 let supabaseClient = null;
 let currentOfficeId = null;
 let currentOfficeName = null;
-let activeCaseId = null, activeSessionId = null, currentCaseForPrint = null, currentDate = new Date();
+let activeCaseId = null, activeStageId = null, activeSessionId = null, currentCaseForPrint = null, currentDate = new Date();
 let currentSelectedDateStr = null, rescheduleSessionId = null;
 
 // هوية النسخة الخاصة بمكتب جاد الرب فقط؛ لا تُنشئ النسخة مكتبًا عامًا جديدًا.
@@ -901,7 +906,7 @@ window.selectCaseForSession = async function(id) {
 window.saveSession = async function() {
     if (!ownerOnly('إضافة جلسة')) return;
     if (!activeCaseId || !document.getElementById('s_date').value) { Swal.fire('تنبيه', 'اختر قضية وأدخل التاريخ', 'warning'); return; }
-    const sessionData = { id: 'S_' + Date.now(), office_id: currentOfficeId, case_id: activeCaseId, session_date: document.getElementById('s_date').value, case_status: document.getElementById('s_case_status').value, decision: document.getElementById('s_decision').value, court_name: document.getElementById('s_court').value, circuit: document.getElementById('s_circuit').value, city: document.getElementById('s_city').value, required_action: document.getElementById('s_required_action').value, responsible_name: document.getElementById('s_responsible').value, followup_date: document.getElementById('s_followup').value || null };
+    const sessionData = { id: 'S_' + Date.now(), office_id: currentOfficeId, case_id: activeCaseId, stage_id: activeStageId || null, session_date: document.getElementById('s_date').value, case_status: document.getElementById('s_case_status').value, decision: document.getElementById('s_decision').value, court_name: document.getElementById('s_court').value, circuit: document.getElementById('s_circuit').value, city: document.getElementById('s_city').value, required_action: document.getElementById('s_required_action').value, responsible_name: document.getElementById('s_responsible').value, followup_date: document.getElementById('s_followup').value || null };
     await db.sessions.add(sessionData);
     await db.sessionChangeLog.add({ office_id: currentOfficeId, session_id: sessionData.id, action: 'created', old_data: {}, new_data: sessionData, changed_at: new Date().toISOString() });
     await db.pendingOperations.add({ operation: 'insert_session', data: sessionData, timestamp: Date.now() });
@@ -1599,6 +1604,9 @@ async function uploadToSupabase() {
             } else if (op.operation === 'delete_event') {
                 const { error } = await supabaseClient.from('events').delete().eq('id', op.data.remote_id);
                 if (error) throw error;
+            } else if (op.operation === 'insert_case_stage' || op.operation === 'update_case_stage') {
+                const { error } = await supabaseClient.from('case_stages').upsert(op.data, { onConflict: 'id' });
+                if (error) throw error;
             } else if (op.operation === 'insert_note') {
                 const { id, ...noteData } = op.data;
                 const { error } = await supabaseClient.from('notes').insert([noteData]);
@@ -1667,6 +1675,9 @@ async function downloadFromSupabase() {
         }
     }
 
+    const { data: remoteStages, error: stagesError } = await supabaseClient.from('case_stages').select('*').eq('office_id', currentOfficeId).limit(5000);
+    if (stagesError) console.error('خطأ في تحميل مراحل القضايا:', stagesError);
+    for (const stage of remoteStages || []) await db.caseStages.put(stage);
     const { data: sessions, error: sessionsError } = await supabaseClient.from('sessions').select('*').eq('office_id', currentOfficeId);
     if (sessionsError) console.error('خطأ في تحميل الجلسات:', sessionsError);
     if (sessions && sessions.length > 0) {
@@ -2533,60 +2544,53 @@ window.refreshOwnerPortal = async function() {
 
 
 
-// عرض تفاصيل القضية: البيانات الأساسية للمرحلة الحالية فقط، مع سجل تاريخي للمراحل السابقة.
+// مراحل القضية: سجل تاريخي داخل نفس القضية، مع بقاء الكود والمجلد والملف موحداً.
 const STAGE_LABELS = { first_instance: 'أول درجة', appeal: 'استئناف', cassation: 'طعن بالنقض', retrial: 'التماس إعادة نظر', opposition: 'معارضة', enforcement: 'تنفيذ', execution_objection: 'إشكال تنفيذ' };
 function partyRowsWithoutPrimary(rows, primaryName) {
     const seen = new Set([String(primaryName || '').trim().toLowerCase()]);
-    return rows.filter(p => {
-        const name = String(p.name || '').trim();
-        const key = name.toLowerCase();
-        if (!name || seen.has(key)) return false;
-        seen.add(key);
-        return true;
-    });
+    return rows.filter(p => { const name = String(p.name || '').trim(); const key = name.toLowerCase(); if (!name || seen.has(key)) return false; seen.add(key); return true; });
 }
-function stageHistoryHtml(stages, currentId) {
-    if (stages.length <= 1) return '';
-    const rows = stages.map((stage, index) => {
-        const current = String(stage.id) === String(currentId);
-        return `<div class="border-bottom py-2 ${current ? 'fw-bold text-success' : ''}"><span class="badge ${current ? 'bg-success' : 'bg-secondary'}">${current ? 'الحالية' : 'تاريخية'}</span> <button class="btn btn-link p-0" onclick="openCaseDetails('${escapeHtml(stage.id)}')">${escapeHtml(STAGE_LABELS[stage.proceeding_type] || stage.proceeding_type || 'مرحلة')} — ${escapeHtml(stage.case_number || '-')}/${escapeHtml(stage.case_year || '-')}</button>${stage.judgment_summary ? `<div class="small text-muted">الحكم: ${escapeHtml(stage.judgment_summary)}</div>` : ''}</div>`;
-    }).join('');
-    return `<div class="party-card mt-3"><h6 class="gold-text"><i class="bi bi-clock-history"></i> سجل المراحل القضائية</h6>${rows}</div>`;
+function stageHistoryHtml(caseRow, stages, currentStageId) {
+    const initial = `<div class="border-bottom py-2 ${!currentStageId ? 'fw-bold text-success' : ''}"><span class="badge ${!currentStageId ? 'bg-success' : 'bg-secondary'}">${!currentStageId ? 'الحالية' : 'تاريخية'}</span> <button class="btn btn-link p-0" onclick="openCaseDetails('${escapeHtml(caseRow.id)}')">${STAGE_LABELS[caseRow.proceeding_type] || 'أول درجة'} — ${escapeHtml(caseRow.case_number || '-')}/${escapeHtml(caseRow.case_year || '-')}</button>${caseRow.judgment_summary ? `<div class="small text-muted">الحكم: ${escapeHtml(caseRow.judgment_summary)}</div>` : ''}</div>`;
+    const rows = stages.map(stage => { const current = String(stage.id) === String(currentStageId); return `<div class="border-bottom py-2 ${current ? 'fw-bold text-success' : ''}"><span class="badge ${current ? 'bg-success' : 'bg-secondary'}">${current ? 'الحالية' : 'تاريخية'}</span> <button class="btn btn-link p-0" onclick="openCaseDetails('${escapeHtml(caseRow.id)}','${escapeHtml(stage.id)}')">${escapeHtml(STAGE_LABELS[stage.stage_type] || stage.stage_type || 'مرحلة')} — ${escapeHtml(stage.case_number || '-')}/${escapeHtml(stage.case_year || '-')}</button>${stage.judgment_summary ? `<div class="small text-muted">الحكم: ${escapeHtml(stage.judgment_summary)}</div>` : ''}</div>`; }).join('');
+    return `<div class="party-card mt-3"><h6 class="gold-text"><i class="bi bi-clock-history"></i> سجل المراحل القضائية داخل نفس القضية</h6>${initial}${rows}</div>`;
 }
 const baseOpenCaseDetails = window.openCaseDetails;
-window.openCaseDetails = async function(id) {
-    await baseOpenCaseDetails(id);
-    const c = await db.cases.get(id);
-    if (!c) return;
-    const rootId = c.root_case_id || c.id;
-    const stages = await db.cases.filter(x => !x.archived && String(x.root_case_id || x.id) === String(rootId)).toArray();
+window.openCaseDetails = async function(caseId, requestedStageId = null) {
+    await baseOpenCaseDetails(caseId);
+    const caseRow = await db.cases.get(caseId); if (!caseRow) return;
+    const stages = await db.caseStages.where('case_id').equals(caseId).toArray();
     stages.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
-    const parties = await db.caseParties.where('case_id').equals(id).toArray();
-    const extraClients = partyRowsWithoutPrimary(parties.filter(p => p.party_type === 'client'), c.client_name);
-    const extraOpponents = partyRowsWithoutPrimary(parties.filter(p => p.party_type === 'opponent'), c.opponent_name);
+    const selected = requestedStageId ? stages.find(s => String(s.id) === String(requestedStageId)) : (stages[stages.length - 1] || null);
+    activeCaseId = caseId; activeStageId = selected?.id || null;
+    const view = selected ? { ...caseRow, ...selected, case_id: caseId, case_code: caseRow.case_code, client_name: caseRow.client_name, opponent_name: caseRow.opponent_name, case_subject: caseRow.case_subject } : caseRow;
+    const sessions = await db.sessions.where('case_id').equals(caseId).toArray();
+    const visibleSessions = activeStageId ? sessions.filter(s => String(s.stage_id || '') === String(activeStageId)) : sessions.filter(s => !s.stage_id);
+    visibleSessions.sort((a, b) => new Date(b.session_date) - new Date(a.session_date));
+    currentCaseForPrint = { ...caseRow, ...view, sessions: visibleSessions };
     const host = document.getElementById('caseDetailContent');
     if (host) {
+        const extra = await db.caseParties.where('case_id').equals(caseId).toArray();
+        const clients = partyRowsWithoutPrimary(extra.filter(p => p.party_type === 'client'), caseRow.client_name);
+        const opponents = partyRowsWithoutPrimary(extra.filter(p => p.party_type === 'opponent'), caseRow.opponent_name);
         const extras = (title, rows) => rows.length ? `<div class="party-card mt-3"><h6 class="gold-text">${title}</h6>${rows.map(p => `<div class="border-bottom py-2"><strong>${escapeHtml(p.name)}</strong> · ${escapeHtml(p.role || '')} · ${escapeHtml(p.phone || '')}</div>`).join('')}</div>` : '';
-        host.insertAdjacentHTML('beforeend', `<div class="record-row mt-2"><strong>مرحلة التقاضي:</strong> ${escapeHtml(STAGE_LABELS[c.proceeding_type] || c.proceeding_type || '-')} · <strong>الأهمية:</strong> ${escapeHtml(c.importance || 'normal')} · <strong>المدينة:</strong> ${escapeHtml(c.city || '-')} ${c.judgment_date ? `<br><strong>تاريخ الحكم:</strong> ${escapeHtml(c.judgment_date)}` : ''} ${c.judgment_summary ? `<br><strong>منطوق الحكم:</strong> ${escapeHtml(c.judgment_summary)}` : ''}</div>${extras('عملاء إضافيون', extraClients)}${extras('خصوم إضافيون', extraOpponents)}${stageHistoryHtml(stages, id)}`);
+        host.innerHTML = `<div class="record-detail"><div class="record-code">كود القضية الموحد: ${escapeHtml(caseRow.case_code || '-')}</div><div class="record-row"><strong>المرحلة المعروضة:</strong> ${escapeHtml(STAGE_LABELS[view.stage_type || view.proceeding_type] || view.stage_type || view.proceeding_type || 'أول درجة')}</div><div class="record-row"><strong>رقم القضية:</strong> ${escapeHtml(view.case_number || '-')} / ${escapeHtml(view.case_year || '-')}</div><div class="record-row"><strong>المحكمة والدائرة:</strong> ${escapeHtml(view.court_name || '-')} — ${escapeHtml(view.circuit || '-')}</div>${partyCardHtml('بيانات العميل', {name:caseRow.client_name, role:view.client_role || caseRow.client_role, nationalId:caseRow.client_national_id, phone:caseRow.client_phone, address:caseRow.client_address, email:caseRow.client_email})}${partyCardHtml('بيانات الخصم', {name:caseRow.opponent_name, role:view.opponent_role || caseRow.opponent_role, nationalId:caseRow.opponent_national_id, phone:caseRow.opponent_phone, address:caseRow.opponent_address, email:caseRow.opponent_email})}<div class="record-row"><strong>موضوع القضية:</strong><br>${escapeHtml(caseRow.case_subject || '-')}</div>${view.judgment_date ? `<div class="record-row"><strong>تاريخ الحكم:</strong> ${escapeHtml(view.judgment_date)}</div>` : ''}${view.judgment_summary ? `<div class="record-row"><strong>منطوق الحكم:</strong><br>${escapeHtml(view.judgment_summary)}</div>` : ''}</div>${extras('عملاء إضافيون', clients)}${extras('خصوم إضافيون', opponents)}${stageHistoryHtml(caseRow, stages, activeStageId)}`;
     }
+    const sessionHost = document.getElementById('caseDetailSessions');
+    if (sessionHost) sessionHost.innerHTML = visibleSessions.length ? visibleSessions.map(x => `<div class="session-item-row"><div><span class="text-info fw-bold fs-5">${new Date(x.session_date).toLocaleString('ar-EG',{dateStyle:'full',timeStyle:'short'})}</span><span class="badge bg-light text-dark mx-3 fs-6">${escapeHtml(x.case_status || '')}</span><div class="fs-6 mt-2 text-white">${escapeHtml(x.decision || 'لا يوجد قرار مسجل')}</div></div>${currentUserRole === 'manager' ? `<button class="btn btn-sm btn-outline-warning" onclick="event.stopPropagation(); openEditSession('${escapeHtml(x.id)}')"><i class="bi bi-pencil fs-5"></i></button>` : ''}</div>`).join('') : '<p class="text-muted">لا توجد جلسات مسجلة لهذه المرحلة.</p>';
     const actions = document.getElementById('caseActionsPanel');
-    if (actions && currentUserRole === 'manager' && (c.status === 'تم الحكم' || c.judgment_summary)) {
-        if (!document.getElementById('addStageFromPanel')) actions.insertAdjacentHTML('beforeend', '<button id="addStageFromPanel" class="btn btn-outline-primary" onclick="addCaseStage(activeCaseId)"><i class="bi bi-diagram-3"></i> إضافة مرحلة تقاضٍ</button>');
-    }
+    if (actions) { actions.innerHTML = detailActionsHtml(true, caseId); if (currentUserRole === 'manager' && (view.status === 'تم الحكم' || view.judgment_summary || caseRow.status === 'تم الحكم')) actions.insertAdjacentHTML('beforeend', '<button id="addStageFromPanel" class="btn btn-outline-primary" onclick="addCaseStage(activeCaseId)"><i class="bi bi-diagram-3"></i> إضافة مرحلة تاريخية</button>'); }
+    showCasePanelSection('data');
 };
-window.addCaseStage = async function(parentId) {
+window.addCaseStage = async function(caseId) {
     if (!ownerOnly('إضافة مرحلة تقاضٍ')) return;
-    const parent = await db.cases.get(parentId); if (!parent) return;
-    const result = await Swal.fire({ title: 'إضافة مرحلة تقاضٍ مرتبطة', html: '<select id="stageInput" class="swal2-select"><option value="appeal">استئناف</option><option value="retrial">التماس إعادة نظر</option><option value="cassation">طعن بالنقض</option><option value="enforcement">تنفيذ</option></select><input id="stageNumberInput" class="swal2-input" placeholder="رقم القضية"><input id="stageYearInput" class="swal2-input" placeholder="السنة"><input id="stageCourtInput" class="swal2-input" placeholder="المحكمة"><input id="stageCircuitInput" class="swal2-input" placeholder="الدائرة"><input id="stageClientRoleInput" class="swal2-input" placeholder="صفة العميل في المرحلة"><input id="stageOpponentRoleInput" class="swal2-input" placeholder="صفة الخصم في المرحلة">', focusConfirm: false, showCancelButton: true, confirmButtonText: 'إنشاء المرحلة', cancelButtonText: 'إلغاء', preConfirm: () => ({ type: document.getElementById('stageInput').value, number: document.getElementById('stageNumberInput').value.trim(), year: document.getElementById('stageYearInput').value.trim(), court: document.getElementById('stageCourtInput').value.trim(), circuit: document.getElementById('stageCircuitInput').value.trim(), clientRole: document.getElementById('stageClientRoleInput').value.trim(), opponentRole: document.getElementById('stageOpponentRoleInput').value.trim() }) });
+    const parent = await db.cases.get(caseId); if (!parent) return;
+    const result = await Swal.fire({ title: 'إضافة مرحلة تاريخية داخل نفس القضية', html: '<select id="stageInput" class="swal2-select"><option value="appeal">استئناف</option><option value="retrial">التماس إعادة نظر</option><option value="cassation">طعن بالنقض</option><option value="enforcement">تنفيذ</option></select><input id="stageNumberInput" class="swal2-input" placeholder="رقم القضية"><input id="stageYearInput" class="swal2-input" placeholder="السنة"><input id="stageCourtInput" class="swal2-input" placeholder="المحكمة"><input id="stageCircuitInput" class="swal2-input" placeholder="الدائرة"><input id="stageClientRoleInput" class="swal2-input" placeholder="صفة العميل في المرحلة"><input id="stageOpponentRoleInput" class="swal2-input" placeholder="صفة الخصم في المرحلة">', focusConfirm:false, showCancelButton:true, confirmButtonText:'حفظ المرحلة', cancelButtonText:'إلغاء', preConfirm:() => ({ type:stageInput.value, number:stageNumberInput.value.trim(), year:stageYearInput.value.trim(), court:stageCourtInput.value.trim(), circuit:stageCircuitInput.value.trim(), clientRole:stageClientRoleInput.value.trim(), opponentRole:stageOpponentRoleInput.value.trim() }) });
     if (!result.isConfirmed) return;
-    const data = result.value;
-    if (!data.number || !data.year || !data.court || !data.circuit || !data.clientRole || !data.opponentRole) return Swal.fire('بيانات ناقصة', 'أدخل رقم القضية والسنة والمحكمة والدائرة وصفة العميل والخصم.', 'warning');
-    const now = new Date().toISOString();
-    const stage = { ...parent, id: 'C_' + Date.now(), case_code: await generateCaseCode(), case_number: data.number, case_year: data.year, court_name: data.court, circuit: data.circuit, client_role: data.clientRole, opponent_role: data.opponentRole, proceeding_type: data.type, parent_case_id: parent.id, appeal_of_case_id: parent.id, root_case_id: parent.root_case_id || parent.id, created_at: now, updated_at: now, status: 'جديدة', judgment_date: null, judgment_summary: null, archived: 0 };
-    await db.cases.add(stage);
-    await db.pendingOperations.add({ operation: 'insert_case', data: stage, timestamp: Date.now() });
-    if (ipcRenderer?.createCaseFolder) await ipcRenderer.createCaseFolder(assertValidCaseCode(stage.case_code), stage.client_name, stage);
-    await loadCasesList();
-    await openCaseDetails(stage.id);
-    Swal.fire({ icon: 'success', title: 'تم إنشاء المرحلة', text: `كود المرحلة: ${stage.case_code}`, timer: 1800, showConfirmButton: false });
+    const d = result.value; if (!d.number || !d.year || !d.court || !d.circuit || !d.clientRole || !d.opponentRole) return Swal.fire('بيانات ناقصة','أدخل جميع بيانات المرحلة المطلوبة.','warning');
+    const stage = { id: generateUUID(), case_id: caseId, office_id: currentOfficeId, stage_type:d.type, case_number:d.number, case_year:d.year, court_name:d.court, circuit:d.circuit, client_role:d.clientRole, opponent_role:d.opponentRole, judgment_date:null, judgment_summary:null, created_at:new Date().toISOString(), updated_at:new Date().toISOString() };
+    await db.caseStages.add(stage);
+    await db.pendingOperations.add({ operation:'insert_case_stage', data:stage, timestamp:Date.now() });
+    await openCaseDetails(caseId, stage.id);
+    Swal.fire({ icon:'success', title:'تم حفظ المرحلة التاريخية', text:'احتفظت القضية بنفس الكود والمجلد. أضف الجلسات الآن.', timer:2200, showConfirmButton:false });
 };
