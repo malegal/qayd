@@ -739,6 +739,8 @@ function collectAdditionalParties(caseId) {
     return rows;
 }
 window.openAddCaseModal = () => { casePartyRowCounter = 0; document.getElementById('additionalClients').innerHTML = ''; document.getElementById('additionalOpponents').innerHTML = ''; showModal('addCaseModal'); };
+window.toggleJudgmentFields = function() { const status = document.getElementById('case_status')?.value; const box = document.getElementById('judgmentFields'); if (box) box.style.display = status === 'تم الحكم' ? 'block' : 'none'; };
+document.addEventListener('DOMContentLoaded', () => { const status = document.getElementById('case_status'); if (status) { status.addEventListener('change', toggleJudgmentFields); toggleJudgmentFields(); } });
 window.saveNewCase = async function() {
     const caseData = {
         id: 'C_' + Date.now(),
@@ -766,6 +768,8 @@ window.saveNewCase = async function() {
                         importance: document.getElementById('case_importance')?.value || 'normal',
                         alert_notes: document.getElementById('case_alert_notes')?.value || '',
                         status: document.getElementById('case_status')?.value || 'جديدة',
+                        judgment_date: document.getElementById('case_judgment_date')?.value || null,
+                        judgment_summary: document.getElementById('case_judgment_summary')?.value.trim() || null,
                         city: document.getElementById('case_city')?.value || '',
                         // يجب توليد الكود قبل إنشاء الكائن وقبل أي كتابة في IndexedDB.
                         case_code: await generateCaseCode(),
@@ -2529,36 +2533,60 @@ window.refreshOwnerPortal = async function() {
 
 
 
-// إثراء شاشة تفاصيل القضية بعد الحفاظ على دوال العرض القديمة.
-const legacyOpenCaseDetails = window.openCaseDetails;
+// عرض تفاصيل القضية: البيانات الأساسية للمرحلة الحالية فقط، مع سجل تاريخي للمراحل السابقة.
+const STAGE_LABELS = { first_instance: 'أول درجة', appeal: 'استئناف', cassation: 'طعن بالنقض', retrial: 'التماس إعادة نظر', opposition: 'معارضة', enforcement: 'تنفيذ', execution_objection: 'إشكال تنفيذ' };
+function partyRowsWithoutPrimary(rows, primaryName) {
+    const seen = new Set([String(primaryName || '').trim().toLowerCase()]);
+    return rows.filter(p => {
+        const name = String(p.name || '').trim();
+        const key = name.toLowerCase();
+        if (!name || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+function stageHistoryHtml(stages, currentId) {
+    if (stages.length <= 1) return '';
+    const rows = stages.map((stage, index) => {
+        const current = String(stage.id) === String(currentId);
+        return `<div class="border-bottom py-2 ${current ? 'fw-bold text-success' : ''}"><span class="badge ${current ? 'bg-success' : 'bg-secondary'}">${current ? 'الحالية' : 'تاريخية'}</span> <button class="btn btn-link p-0" onclick="openCaseDetails('${escapeHtml(stage.id)}')">${escapeHtml(STAGE_LABELS[stage.proceeding_type] || stage.proceeding_type || 'مرحلة')} — ${escapeHtml(stage.case_number || '-')}/${escapeHtml(stage.case_year || '-')}</button>${stage.judgment_summary ? `<div class="small text-muted">الحكم: ${escapeHtml(stage.judgment_summary)}</div>` : ''}</div>`;
+    }).join('');
+    return `<div class="party-card mt-3"><h6 class="gold-text"><i class="bi bi-clock-history"></i> سجل المراحل القضائية</h6>${rows}</div>`;
+}
+const baseOpenCaseDetails = window.openCaseDetails;
 window.openCaseDetails = async function(id) {
-    await legacyOpenCaseDetails(id);
+    await baseOpenCaseDetails(id);
     const c = await db.cases.get(id);
+    if (!c) return;
+    const rootId = c.root_case_id || c.id;
+    const stages = await db.cases.filter(x => !x.archived && String(x.root_case_id || x.id) === String(rootId)).toArray();
+    stages.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
     const parties = await db.caseParties.where('case_id').equals(id).toArray();
-    const caseHost = document.getElementById('caseDetailContent');
-    if (caseHost && parties.length) {
-        const clients = parties.filter(p => p.party_type === 'client'); const opponents = parties.filter(p => p.party_type === 'opponent');
-        const partyHtml = (title, rows) => rows.length ? `<div class="party-card"><h6 class="gold-text">${title}</h6>${rows.map(p => `<div class="border-bottom py-2"><strong>${escapeHtml(p.name)}</strong> · ${escapeHtml(p.role || '')} · ${escapeHtml(p.phone || '')}<div class="small">التوكيل: ${escapeHtml(p.power_of_attorney_number || '-')} / ${escapeHtml(p.power_of_attorney_year || '-')} · مكتب التوثيق: ${escapeHtml(p.notary_office || '-')}</div></div>`).join('')}</div>` : '';
-        caseHost.innerHTML += `<div class="record-row"><strong>مرحلة التقاضي:</strong> ${escapeHtml(c?.proceeding_type || '-')} · <strong>الأهمية:</strong> ${escapeHtml(c?.importance || 'normal')} · <strong>المدينة:</strong> ${escapeHtml(c?.city || '-')}<br><strong>التنبيهات:</strong> ${escapeHtml(c?.alert_notes || '-')}</div>` + partyHtml('العملاء', clients) + partyHtml('الخصوم', opponents);
+    const extraClients = partyRowsWithoutPrimary(parties.filter(p => p.party_type === 'client'), c.client_name);
+    const extraOpponents = partyRowsWithoutPrimary(parties.filter(p => p.party_type === 'opponent'), c.opponent_name);
+    const host = document.getElementById('caseDetailContent');
+    if (host) {
+        const extras = (title, rows) => rows.length ? `<div class="party-card mt-3"><h6 class="gold-text">${title}</h6>${rows.map(p => `<div class="border-bottom py-2"><strong>${escapeHtml(p.name)}</strong> · ${escapeHtml(p.role || '')} · ${escapeHtml(p.phone || '')}</div>`).join('')}</div>` : '';
+        host.insertAdjacentHTML('beforeend', `<div class="record-row mt-2"><strong>مرحلة التقاضي:</strong> ${escapeHtml(STAGE_LABELS[c.proceeding_type] || c.proceeding_type || '-')} · <strong>الأهمية:</strong> ${escapeHtml(c.importance || 'normal')} · <strong>المدينة:</strong> ${escapeHtml(c.city || '-')} ${c.judgment_date ? `<br><strong>تاريخ الحكم:</strong> ${escapeHtml(c.judgment_date)}` : ''} ${c.judgment_summary ? `<br><strong>منطوق الحكم:</strong> ${escapeHtml(c.judgment_summary)}` : ''}</div>${extras('عملاء إضافيون', extraClients)}${extras('خصوم إضافيون', extraOpponents)}${stageHistoryHtml(stages, id)}`);
     }
-    const logs = await db.sessionChangeLog.where('office_id').equals(currentOfficeId).toArray(); const caseSessions = await db.sessions.where('case_id').equals(id).toArray(); const sessionIds = new Set(caseSessions.map(s => String(s.id))); const relevant = logs.filter(l => sessionIds.has(String(l.session_id))).sort((a,b) => new Date(b.changed_at) - new Date(a.changed_at));
-    if (relevant.length) document.getElementById('caseDetailSessions').insertAdjacentHTML('beforeend', `<hr><h6 class="gold-text">سجل تغييرات الجلسات</h6>${relevant.map(l => `<div class="small border-bottom py-1">${new Date(l.changed_at).toLocaleString('ar-EG')} — ${escapeHtml(l.action)}</div>`).join('')}`);
+    const actions = document.getElementById('caseActionsPanel');
+    if (actions && currentUserRole === 'manager' && (c.status === 'تم الحكم' || c.judgment_summary)) {
+        if (!document.getElementById('addStageFromPanel')) actions.insertAdjacentHTML('beforeend', '<button id="addStageFromPanel" class="btn btn-outline-primary" onclick="addCaseStage(activeCaseId)"><i class="bi bi-diagram-3"></i> إضافة مرحلة تقاضٍ</button>');
+    }
 };
-
-
 window.addCaseStage = async function(parentId) {
     if (!ownerOnly('إضافة مرحلة تقاضٍ')) return;
     const parent = await db.cases.get(parentId); if (!parent) return;
-    const result = await Swal.fire({ title: 'إضافة مرحلة تقاضٍ مرتبطة', html: '<select id="stageInput" class="swal2-select"><option value="appeal">استئناف</option><option value="retrial">التماس إعادة نظر</option><option value="cassation">طعن</option><option value="enforcement">تنفيذ</option></select><input id="stageNumberInput" class="swal2-input" placeholder="رقم القضية في المرحلة الجديدة"><input id="stageYearInput" class="swal2-input" placeholder="سنة القضية">', focusConfirm: false, showCancelButton: true, confirmButtonText: 'إنشاء المرحلة', cancelButtonText: 'إلغاء', preConfirm: () => ({ type: document.getElementById('stageInput').value, number: document.getElementById('stageNumberInput').value.trim(), year: document.getElementById('stageYearInput').value.trim() }) });
+    const result = await Swal.fire({ title: 'إضافة مرحلة تقاضٍ مرتبطة', html: '<select id="stageInput" class="swal2-select"><option value="appeal">استئناف</option><option value="retrial">التماس إعادة نظر</option><option value="cassation">طعن بالنقض</option><option value="enforcement">تنفيذ</option></select><input id="stageNumberInput" class="swal2-input" placeholder="رقم القضية"><input id="stageYearInput" class="swal2-input" placeholder="السنة"><input id="stageCourtInput" class="swal2-input" placeholder="المحكمة"><input id="stageCircuitInput" class="swal2-input" placeholder="الدائرة"><input id="stageClientRoleInput" class="swal2-input" placeholder="صفة العميل في المرحلة"><input id="stageOpponentRoleInput" class="swal2-input" placeholder="صفة الخصم في المرحلة">', focusConfirm: false, showCancelButton: true, confirmButtonText: 'إنشاء المرحلة', cancelButtonText: 'إلغاء', preConfirm: () => ({ type: document.getElementById('stageInput').value, number: document.getElementById('stageNumberInput').value.trim(), year: document.getElementById('stageYearInput').value.trim(), court: document.getElementById('stageCourtInput').value.trim(), circuit: document.getElementById('stageCircuitInput').value.trim(), clientRole: document.getElementById('stageClientRoleInput').value.trim(), opponentRole: document.getElementById('stageOpponentRoleInput').value.trim() }) });
     if (!result.isConfirmed) return;
-    const code = await generateCaseCode(); const now = new Date().toISOString();
-    const stage = { ...parent, id: 'C_' + Date.now(), case_code: code, case_number: result.value.number || '', case_year: result.value.year || '', proceeding_type: result.value.type, parent_case_id: parent.id, appeal_of_case_id: parent.id, root_case_id: parent.root_case_id || parent.id, created_at: now, archived: 0 };
-    delete stage.updated_at; await db.cases.add(stage); await db.pendingOperations.add({ operation: 'insert_case', data: stage, timestamp: Date.now() });
-    Swal.fire({ icon: 'success', title: 'تم إنشاء المرحلة', text: `كود المرحلة: ${code}`, timer: 1800, showConfirmButton: false }); await loadCasesList();
-};
-
-const previousCaseDetailWrapper = window.openCaseDetails;
-window.openCaseDetails = async function(id) {
-    await previousCaseDetailWrapper(id);
-    if (currentUserRole === 'manager' && document.getElementById('caseActionsPanel')) document.getElementById('caseActionsPanel').insertAdjacentHTML('beforeend', '<button class="btn btn-outline-primary" onclick="addCaseStage(activeCaseId)"><i class="bi bi-diagram-3"></i> إضافة مرحلة تقاضٍ</button>');
+    const data = result.value;
+    if (!data.number || !data.year || !data.court || !data.circuit || !data.clientRole || !data.opponentRole) return Swal.fire('بيانات ناقصة', 'أدخل رقم القضية والسنة والمحكمة والدائرة وصفة العميل والخصم.', 'warning');
+    const now = new Date().toISOString();
+    const stage = { ...parent, id: 'C_' + Date.now(), case_code: await generateCaseCode(), case_number: data.number, case_year: data.year, court_name: data.court, circuit: data.circuit, client_role: data.clientRole, opponent_role: data.opponentRole, proceeding_type: data.type, parent_case_id: parent.id, appeal_of_case_id: parent.id, root_case_id: parent.root_case_id || parent.id, created_at: now, updated_at: now, status: 'جديدة', judgment_date: null, judgment_summary: null, archived: 0 };
+    await db.cases.add(stage);
+    await db.pendingOperations.add({ operation: 'insert_case', data: stage, timestamp: Date.now() });
+    if (ipcRenderer?.createCaseFolder) await ipcRenderer.createCaseFolder(assertValidCaseCode(stage.case_code), stage.client_name, stage);
+    await loadCasesList();
+    await openCaseDetails(stage.id);
+    Swal.fire({ icon: 'success', title: 'تم إنشاء المرحلة', text: `كود المرحلة: ${stage.case_code}`, timer: 1800, showConfirmButton: false });
 };
