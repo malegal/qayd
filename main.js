@@ -66,6 +66,17 @@ ipcMain.handle('repair-indexeddb', async () => {
 });
 
 // ========== دوال المجلدات والقوالب (كما هي) ==========
+// يعتمد مجلد القضية على الكود فقط؛ تغيير اسم العميل لا ينشئ مجلداً ثانياً.
+function safeFolderSegment(value, fallback = 'عميل') { return String(value || fallback).replace(/[<>:"/\\|?*]/g, '_').trim() || fallback; }
+function resolveCaseFolder(baseDir, caseCode, clientName, create = false) {
+    const code = String(caseCode || '').trim();
+    if (create) fs.mkdirSync(baseDir, { recursive: true });
+    let names = [];
+    try { names = fs.readdirSync(baseDir, { withFileTypes: true }).filter(e => e.isDirectory() && e.name.startsWith(`${code} - `)).map(e => e.name).sort(); } catch (_) {}
+    const result = path.join(baseDir, names[0] || `${code} - ${safeFolderSegment(clientName)}`);
+    if (create) fs.mkdirSync(result, { recursive: true });
+    return result;
+}
 ipcMain.handle('create-case-folder', async (event, caseCode, clientName, caseData) => {
     try {
         // حماية المستوى الرئيسي: لا يُنشأ مجلد أو ملف قضية خارج صيغة كود qayd المعتمدة.
@@ -77,11 +88,8 @@ ipcMain.handle('create-case-folder', async (event, caseCode, clientName, caseDat
         }
         const docsPath = app.getPath('documents');
         const baseDir = path.join(docsPath, 'مكتب المحامي', 'القضايا');
-        const folderName = `${caseCode} - ${clientName}`.replace(/[<>:"\/\\|?*]/g, '_');
-        const folderPath = path.join(baseDir, folderName);
-        fs.mkdirSync(baseDir, { recursive: true });
-        if (!fs.existsSync(folderPath)) {
-            fs.mkdirSync(folderPath, { recursive: true });
+        const folderPath = resolveCaseFolder(baseDir, caseCode, clientName, true);
+        if (!fs.existsSync(path.join(folderPath, 'بيانات_القضية.json'))) {
             fs.mkdirSync(path.join(folderPath, 'مستندات العميل'), { recursive: true });
             fs.mkdirSync(path.join(folderPath, 'المذكرات والاحكام'), { recursive: true });
             fs.writeFileSync(path.join(folderPath, 'بيانات_القضية.json'), JSON.stringify(caseData, null, 2));
@@ -97,7 +105,7 @@ ipcMain.handle('create-case-stage-folder', async (event, caseCode, clientName, s
         if (typeof caseCode !== 'string' || !/^(?:(?:MJ|J|M)-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}|JELR-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6})$/.test(caseCode.trim())) return { success: false, error: 'كود القضية غير صالح' };
         if (!stageData || stageData.case_id == null || !stageData.stage_type) return { success: false, error: 'بيانات المرحلة ناقصة' };
         const docsPath = app.getPath('documents');
-        const caseFolder = path.join(docsPath, 'مكتب المحامي', 'القضايا', `${caseCode.trim()} - ${String(clientName || 'عميل').replace(/[<>:"/\\|?*]/g, '_')}`);
+        const caseFolder = resolveCaseFolder(path.join(docsPath, 'مكتب المحامي', 'القضايا'), caseCode, clientName, true);
         const stageLabel = { appeal: 'استئناف', cassation: 'طعن بالنقض', retrial: 'التماس إعادة نظر', enforcement: 'تنفيذ', opposition: 'معارضة', execution_objection: 'إشكال تنفيذ' }[stageData.stage_type] || 'مرحلة';
         const stageFolderName = `${stageLabel} - ${String(stageData.case_number || 'بدون رقم')}-${String(stageData.case_year || '')}`.replace(/[<>:"/\\|?*]/g, '_');
         const stageFolder = path.join(caseFolder, 'مراحل القضية', stageFolderName);
@@ -114,7 +122,7 @@ ipcMain.handle('open-case-stage-folder', async (event, caseCode, clientName, sta
         if (!stageData || stageData.case_id == null || !stageData.stage_type) return { success: false, error: 'بيانات المرحلة ناقصة' };
         const docsPath = app.getPath('documents');
         const safeClient = String(clientName || 'عميل').replace(/[<>:"/\\|?*]/g, '_');
-        const caseFolder = path.join(docsPath, 'مكتب المحامي', 'القضايا', `${caseCode.trim()} - ${safeClient}`);
+        const caseFolder = resolveCaseFolder(path.join(docsPath, 'مكتب المحامي', 'القضايا'), caseCode, clientName, false);
         const stageLabel = { appeal: 'استئناف', cassation: 'طعن بالنقض', retrial: 'التماس إعادة نظر', enforcement: 'تنفيذ', opposition: 'معارضة', execution_objection: 'إشكال تنفيذ' }[stageData.stage_type] || 'مرحلة';
         const stageFolderName = `${stageLabel} - ${String(stageData.case_number || 'بدون رقم')}-${String(stageData.case_year || '')}`.replace(/[<>:"/\\|?*]/g, '_');
         const stageFolder = path.join(caseFolder, 'مراحل القضية', stageFolderName);
@@ -129,6 +137,10 @@ ipcMain.handle('open-case-folder', async (event, folderName) => {
         const baseDir = path.join(docsPath, 'مكتب المحامي', 'القضايا');
         const archiveDir = path.join(docsPath, 'مكتب المحامي', 'أرشيف');
         let folderPath = path.join(baseDir, folderName);
+        if (!fs.existsSync(folderPath)) {
+            const code = String(folderName || '').split(' - ')[0];
+            if (code) folderPath = resolveCaseFolder(baseDir, code, folderName.split(' - ').slice(1).join(' - '), false);
+        }
         if (fs.existsSync(folderPath)) { await shell.openPath(folderPath); return { success: true }; }
         folderPath = path.join(archiveDir, folderName);
         if (fs.existsSync(folderPath)) { await shell.openPath(folderPath); return { success: true }; }
@@ -218,7 +230,7 @@ ipcMain.handle('create-professional-file-folder', async (event, fileCode, client
 
 ipcMain.handle('open-professional-file-folder', async (event, fileCode, clientName, fileType) => {
     try {
-        if (typeof fileCode !== 'string' || !/^(RE|CT|CO|PI|DR|DC|GR|PR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(fileCode.trim())) return { success: false, error: 'كود غير صالح' };
+        if (typeof fileCode !== 'string' || !/^(?:(?:MJ|J|M)-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}|(?:RE|CT|CO|PI|DR|DC|GR|PR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6})$/.test(fileCode.trim())) return { success: false, error: 'كود غير صالح' };
         const folders = { prosecution_investigation: 'تحقيقات النيابة', detention_renewal: 'تجديد الحبس', dispute_committee: 'لجان فض المنازعات', grievance: 'التظلمات', legal_procedure: 'الإجراءات القانونية', real_estate: 'تسجيل العقارات', contract_writing: 'العقود', company_formation: 'تأسيس الشركات', administrative: 'خدمات إدارية' };
         const folderPath = path.join(app.getPath('documents'), 'مكتب المحامي', 'الخدمات', folders[fileType] || folders.administrative, `${fileCode} - ${clientName}`.replace(/[<>:"/\\|?*]/g, '_'));
         if (!fs.existsSync(folderPath)) return { success: false, error: 'المجلد غير موجود' };
@@ -290,8 +302,8 @@ ipcMain.handle('copy-case-document', async (event, sourcePaths, caseCode, client
         const paths = Array.isArray(sourcePaths) ? sourcePaths : [sourcePaths];
         if (!paths.length || paths.some(source => !source || !fs.existsSync(source))) return { success: false, error: 'أحد المستندات المصدر غير موجود' };
         if (typeof caseCode !== 'string' || !/^(?:(?:MJ|J|M)-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}|JELR-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6})$/.test(caseCode.trim())) return { success: false, error: 'كود القضية غير صالح' };
-        const safeClient = String(clientName || 'عميل').replace(/[<>:"/\\|?*]/g, '_');
-        const targetDir = path.join(app.getPath('documents'), 'مكتب المحامي', 'القضايا', `${caseCode.trim()} - ${safeClient}`, 'مستندات العميل');
+        const caseFolder = resolveCaseFolder(path.join(app.getPath('documents'), 'مكتب المحامي', 'القضايا'), caseCode, clientName, true);
+        const targetDir = path.join(caseFolder, 'مستندات العميل');
         fs.mkdirSync(targetDir, { recursive: true });
         const copied = [];
         for (const source of paths) {

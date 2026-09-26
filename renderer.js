@@ -119,6 +119,11 @@ db.version(14).stores({
 db.version(15).stores({
     caseStages: 'id, case_id, office_id, legacy_case_id, stage_type, case_number, case_year, created_at'
 });
+db.version(16).stores({
+    stageFees: 'stage_id, case_id, office_id, total, paid, remaining',
+    stagePayments: '++id, remote_id, office_id, stage_id, case_id, amount, date',
+    stageExpenses: '++id, remote_id, office_id, stage_id, case_id, amount, date, category'
+});
 
 let supabaseClient = null;
 let currentOfficeId = null;
@@ -141,7 +146,7 @@ async function normalizeOwnerLocalOffice() {
     if (!office || !isOwnerEmail(office.email)) return false;
     const oldOfficeId = office.office_id;
     if (oldOfficeId !== OWNER_OFFICE_ID) {
-        for (const table of [db.cases, db.sessions, db.tasks, db.expenses, db.financialTransactions, db.officeFiles, db.fileEvents, db.notes, db.legalFiles, db.proceedings, db.serviceActions, db.approvalRequests, db.auditLogs, db.syncConflicts]) {
+        for (const table of [db.cases, db.sessions, db.tasks, db.expenses, db.financialTransactions, db.officeFiles, db.fileEvents, db.notes, db.legalFiles, db.proceedings, db.serviceActions, db.approvalRequests, db.auditLogs, db.syncConflicts, db.stageFees, db.stagePayments, db.stageExpenses]) {
             const rows = await table.toArray();
             for (const row of rows) if (row.office_id === oldOfficeId) await table.update(row.id, { office_id: OWNER_OFFICE_ID });
         }
@@ -541,6 +546,9 @@ window.verifyPin = async function() {
     if (offices.length === 0) {
         showModal('officeSetupModal');
         return;
+    }
+    if (!isOwnerEmail(offices[0].email)) {
+        return Swal.fire('غير مسموح', 'هذه النسخة الداخلية مخصصة لمكتب جاد الرب فقط.', 'error');
     }
     if (entered === offices[0].pin) {
         currentOfficeId = offices[0].office_id;
@@ -1440,6 +1448,12 @@ async function uploadAllLocalOfficeData() {
         const { error } = await supabaseClient.from('financial_transactions').upsert(ledgerPayload, { onConflict: 'id' });
         if (error) throw error;
     }
+    const stageFees = await db.stageFees.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of stageFees) { const { error } = await supabaseClient.from('stage_fees').upsert(record, { onConflict: 'stage_id' }); if (error) throw error; }
+    const stagePayments = await db.stagePayments.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of stagePayments) { const { id, remote_id, ...data } = record; const { error } = await supabaseClient.from('stage_payments').upsert({ ...data, id: remote_id || generateUUID(), office_id: currentOfficeId }, { onConflict: 'id' }); if (error) throw error; }
+    const stageExpenses = await db.stageExpenses.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of stageExpenses) { const { id, remote_id, owner_id, date, ...data } = record; const { error } = await supabaseClient.from('stage_expenses').upsert({ ...data, id: remote_id || generateUUID(), office_id: currentOfficeId, expense_date: record.expense_date || date }, { onConflict: 'id' }); if (error) throw error; }
     const legacyPayments = await db.payments.toArray();
     for (const payment of legacyPayments) {
         // payment.id رقم محلي وليس UUID؛ نشتق منه UUID صالحًا وثابتًا، ولا نرسل أي حقل محلي إضافي إلى Supabase.
@@ -1629,6 +1643,18 @@ async function uploadToSupabase() {
             } else if (op.operation === 'delete_session') {
                 const { error } = await supabaseClient.from('sessions').delete().eq('id', op.data.id);
                 if (error) throw error;
+            } else if (op.operation === 'upsert_stage_fee') {
+                const { error } = await supabaseClient.from('stage_fees').upsert(op.data, { onConflict: 'stage_id' });
+                if (error) throw error;
+            } else if (op.operation === 'insert_stage_payment') {
+                const { id, remote_id, ...paymentData } = op.data;
+                const { error } = await supabaseClient.from('stage_payments').upsert({ ...paymentData, id: remote_id || generateUUID(), office_id: currentOfficeId }, { onConflict: 'id' });
+                if (error) throw error;
+            } else if (op.operation === 'insert_stage_expense') {
+                const expenseData = { ...op.data, id: op.data.remote_id || generateUUID(), expense_date: op.data.expense_date || op.data.date };
+                delete expenseData.date; delete expenseData.remote_id; delete expenseData.owner_id;
+                const { error } = await supabaseClient.from('stage_expenses').upsert({ ...expenseData, office_id: currentOfficeId }, { onConflict: 'id' });
+                if (error) throw error;
             } else if (op.operation === 'upsert_fee') {
                 const { error } = await supabaseClient.from('fees').upsert(op.data, { onConflict: 'case_id' });
                 if (error) throw error;
@@ -1798,6 +1824,15 @@ async function downloadFromSupabase() {
         else { delete local.id; await db.payments.add(local); }
     }
 
+    const { data: remoteStageFees, error: stageFeesError } = await supabaseClient.from('stage_fees').select('*').eq('office_id', currentOfficeId).limit(5000);
+    if (stageFeesError) console.error('خطأ في تحميل أتعاب المراحل:', stageFeesError);
+    for (const row of remoteStageFees || []) await db.stageFees.put(row);
+    const { data: remoteStagePayments, error: stagePaymentsError } = await supabaseClient.from('stage_payments').select('*').eq('office_id', currentOfficeId).limit(5000);
+    if (stagePaymentsError) console.error('خطأ في تحميل مدفوعات المراحل:', stagePaymentsError);
+    for (const row of remoteStagePayments || []) { const existing = await db.stagePayments.where('remote_id').equals(String(row.id)).first(); const local = { ...row, remote_id: String(row.id), id: existing?.id, date: row.date }; if (existing) await db.stagePayments.update(existing.id, local); else { delete local.id; await db.stagePayments.add(local); } }
+    const { data: remoteStageExpenses, error: stageExpensesError } = await supabaseClient.from('stage_expenses').select('*').eq('office_id', currentOfficeId).limit(5000);
+    if (stageExpensesError) console.error('خطأ في تحميل مصروفات المراحل:', stageExpensesError);
+    for (const row of remoteStageExpenses || []) { const existing = await db.stageExpenses.where('remote_id').equals(String(row.id)).first(); const local = { ...row, remote_id: String(row.id), id: existing?.id, date: row.date || row.expense_date }; if (existing) await db.stageExpenses.update(existing.id, local); else { delete local.id; await db.stageExpenses.add(local); } }
     const { data: remoteLedger, error: ledgerError } = await supabaseClient.from('financial_transactions').select('*').eq('office_id', currentOfficeId).limit(5000);
     if (ledgerError) console.error('خطأ في تحميل دفتر المالية:', ledgerError);
     for (const record of remoteLedger || []) {
@@ -1822,42 +1857,37 @@ async function downloadFromSupabase() {
 }
 
 // ========== 15. الأتعاب ==========
+function currentFinanceTables() {
+    return activeStageId ? { fees: db.stageFees, payments: db.stagePayments, expenses: db.stageExpenses, key: activeStageId, stage: activeStageId } : { fees: db.fees, payments: db.payments, expenses: db.expenses, key: activeCaseId, stage: null };
+}
 window.openFeesModal = async function(caseId) {
     if (!caseId) return;
     activeCaseId = caseId;
     hideModal('caseModal');
     document.getElementById('payDate').value = new Date().toISOString().split('T')[0];
     document.getElementById('expenseDate').value = new Date().toISOString().split('T')[0];
-    document.getElementById('payAmount').value = '';
-    document.getElementById('expenseAmount').value = '';
-    document.getElementById('expenseCategory').value = '';
-    let fee = await db.fees.get(caseId);
-    if (!fee) { fee = { case_id: caseId, total: 0, paid: 0, remaining: 0, notes: '' }; await db.fees.put(fee); }
-    const payments = await db.payments.where('case_id').equals(caseId).toArray();
-    const totalPaid = payments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
-    fee.paid = totalPaid;
-    fee.remaining = (parseFloat(fee.total) || 0) - totalPaid;
-    await db.fees.put(fee);
-    const expenses = await db.expenses.where('case_id').equals(caseId).toArray();
-    const totalExpenses = expenses.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
-    document.getElementById('feeTotalInput').value = fee.total || 0;
-    document.getElementById('feePaidVal').innerText = totalPaid.toFixed(2);
-    document.getElementById('feeRemVal').innerText = fee.remaining.toFixed(2);
-    document.getElementById('feeGeneralNotes').value = fee.notes || '';
-    document.getElementById('financeCollectedVal').innerText = totalPaid.toFixed(2);
-    document.getElementById('financeExpensesVal').innerText = totalExpenses.toFixed(2);
-    document.getElementById('financeProfitVal').innerText = (totalPaid - totalExpenses).toFixed(2);
-    payments.sort((a, b) => new Date(b.date) - new Date(a.date));
-    document.getElementById('paymentsHistoryList').innerHTML = payments.map(p => `<div class="d-flex justify-content-between border-bottom border-secondary py-2"><span>${new Date(p.date).toLocaleDateString('ar-EG')} — ${escapeHtml(p.note || '')}</span><strong class="text-success">${p.amount} ج.م <button class="btn btn-sm btn-outline-danger" onclick="deletePayment(${p.id})"><i class="bi bi-trash"></i></button></strong></div>`).join('') || '<div class="text-muted text-center py-3">لا توجد دفعات</div>';
-    expenses.sort((a, b) => new Date(b.date) - new Date(a.date));
-    document.getElementById('expensesHistoryList').innerHTML = expenses.map(e => `<div class="d-flex justify-content-between border-bottom border-secondary py-2"><span>${new Date(e.date).toLocaleDateString('ar-EG')} — ${escapeHtml(e.category || 'مصروف')}</span><strong class="text-danger">${e.amount} ج.م <button class="btn btn-sm btn-outline-danger" onclick="deleteExpense(${e.id})"><i class="bi bi-trash"></i></button></strong></div>`).join('') || '<div class="text-muted text-center py-3">لا توجد مصروفات</div>';
-    await renderReceipts(caseId);
-    showModal('feesModal');
+    document.getElementById('payAmount').value = ''; document.getElementById('expenseAmount').value = ''; document.getElementById('expenseCategory').value = '';
+    const tables = currentFinanceTables();
+    let fee = await tables.fees.get(tables.key);
+    if (!fee) { fee = { [tables.stage ? 'stage_id' : 'case_id']: tables.key, case_id: caseId, office_id: currentOfficeId, total: 0, paid: 0, remaining: 0, notes: '' }; await tables.fees.put(fee); }
+    const payments = await tables.payments.where(tables.stage ? 'stage_id' : 'case_id').equals(tables.key).toArray();
+    const totalPaid = payments.reduce((sum, x) => sum + (parseFloat(x.amount) || 0), 0);
+    fee.paid = totalPaid; fee.remaining = (parseFloat(fee.total) || 0) - totalPaid; await tables.fees.put(fee);
+    const expenses = await tables.expenses.where(tables.stage ? 'stage_id' : 'case_id').equals(tables.key).toArray();
+    const totalExpenses = expenses.reduce((sum, x) => sum + (parseFloat(x.amount) || 0), 0);
+    document.getElementById('feeTotalInput').value = fee.total || 0; document.getElementById('feePaidVal').innerText = totalPaid.toFixed(2); document.getElementById('feeRemVal').innerText = fee.remaining.toFixed(2); document.getElementById('feeGeneralNotes').value = fee.notes || '';
+    document.getElementById('financeCollectedVal').innerText = totalPaid.toFixed(2); document.getElementById('financeExpensesVal').innerText = totalExpenses.toFixed(2); document.getElementById('financeProfitVal').innerText = (totalPaid - totalExpenses).toFixed(2);
+    payments.sort((a,b) => new Date(b.date)-new Date(a.date)); expenses.sort((a,b) => new Date(b.date)-new Date(a.date));
+    document.getElementById('paymentsHistoryList').innerHTML = payments.map(x => `<div class="d-flex justify-content-between border-bottom border-secondary py-2"><span>${new Date(x.date).toLocaleDateString('ar-EG')} — ${escapeHtml(x.note || '')}</span><strong class="text-success">${x.amount} ج.م <button class="btn btn-sm btn-outline-danger" onclick="deletePayment(${x.id})"><i class="bi bi-trash"></i></button></strong></div>`).join('') || '<div class="text-muted text-center py-3">لا توجد دفعات</div>';
+    document.getElementById('expensesHistoryList').innerHTML = expenses.map(x => `<div class="d-flex justify-content-between border-bottom border-secondary py-2"><span>${new Date(x.date).toLocaleDateString('ar-EG')} — ${escapeHtml(x.category || 'مصروف')}</span><strong class="text-danger">${x.amount} ج.م <button class="btn btn-sm btn-outline-danger" onclick="deleteExpense(${x.id})"><i class="bi bi-trash"></i></button></strong></div>`).join('') || '<div class="text-muted text-center py-3">لا توجد مصروفات</div>';
+    await renderReceipts(caseId); showModal('feesModal');
 };
-window.updateTotalFee = async function() { if (!ownerOnly('تعديل الأتعاب')) return; const newTotal = parseFloat(document.getElementById('feeTotalInput').value) || 0; const fee = await db.fees.get(activeCaseId); if (fee) { fee.total = newTotal; fee.remaining = newTotal - fee.paid; await db.fees.put(fee); await db.pendingOperations.add({ operation: 'upsert_fee', data: fee, timestamp: Date.now() }); document.getElementById('feeRemVal').innerText = fee.remaining.toFixed(2); } };
-window.updateFeeNotes = async function() { if (!ownerOnly('تعديل الأتعاب')) return; const fee = await db.fees.get(activeCaseId); if (fee) { fee.notes = document.getElementById('feeGeneralNotes').value; await db.fees.put(fee); await db.pendingOperations.add({ operation: 'upsert_fee', data: fee, timestamp: Date.now() }); } };
-window.addPayment = async function() { if (!ownerOnly('إضافة دفعة')) return; if (!activeCaseId) return; const amount = parseFloat(document.getElementById('payAmount').value); const date = document.getElementById('payDate').value; const note = document.getElementById('payNote').value; if (!amount || amount <= 0 || !date) return Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'أدخل مبلغًا وتاريخًا صحيحين', background: '#0f172a' }); const payment = { case_id: activeCaseId, amount, date, note, remote_id: generateUUID() }; const id = await db.payments.add(payment); await db.pendingOperations.add({ operation: 'insert_payment', data: { ...payment, id }, timestamp: Date.now() }); await db.financialTransactions.put({ id: generateUUID(), office_id: currentOfficeId, transaction_type: 'income', transaction_scope: 'case', case_id: activeCaseId, office_file_id: null, amount, transaction_date: date, category: 'دفعة أتعاب', description: note || '', created_at: new Date().toISOString() }); await openFeesModal(activeCaseId); };
-window.addExpense = async function() { if (!ownerOnly('إضافة مصروف')) return; if (!activeCaseId) return; const amount = parseFloat(document.getElementById('expenseAmount').value); const date = document.getElementById('expenseDate').value; const category = document.getElementById('expenseCategory').value.trim(); if (!amount || amount <= 0 || !date) return Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'أدخل قيمة المصروف وتاريخه', background: '#0f172a' }); const expense = { office_id: currentOfficeId, owner_id: activeCaseId, case_id: activeCaseId, amount, date, category, remote_id: generateUUID() }; const id = await db.expenses.add(expense); await db.pendingOperations.add({ operation: 'insert_expense', data: { ...expense, id }, timestamp: Date.now() }); await db.financialTransactions.put({ id: generateUUID(), office_id: currentOfficeId, transaction_type: 'expense', transaction_scope: 'case', case_id: activeCaseId, office_file_id: null, amount, transaction_date: date, category: category || 'مصروف', description: '', created_at: new Date().toISOString() }); await openFeesModal(activeCaseId); };
+window.updateTotalFee = async function() { if (!ownerOnly('تعديل الأتعاب')) return; const t=currentFinanceTables(), fee=await t.fees.get(t.key); if (fee) { fee.total=parseFloat(document.getElementById('feeTotalInput').value)||0; fee.remaining=fee.total-fee.paid; await t.fees.put(fee); await db.pendingOperations.add({operation:t.stage?'upsert_stage_fee':'upsert_fee',data:fee,timestamp:Date.now()}); document.getElementById('feeRemVal').innerText=fee.remaining.toFixed(2); } };
+window.updateFeeNotes = async function() { if (!ownerOnly('تعديل الأتعاب')) return; const t=currentFinanceTables(), fee=await t.fees.get(t.key); if (fee) { fee.notes=document.getElementById('feeGeneralNotes').value; await t.fees.put(fee); await db.pendingOperations.add({operation:t.stage?'upsert_stage_fee':'upsert_fee',data:fee,timestamp:Date.now()}); } };
+window.addPayment = async function() { if (!ownerOnly('إضافة دفعة')) return; if (!activeCaseId) return; const amount=parseFloat(document.getElementById('payAmount').value), date=document.getElementById('payDate').value, note=document.getElementById('payNote').value; if (!amount || amount<=0 || !date) return Swal.fire({icon:'warning',title:'تنبيه',text:'أدخل مبلغًا وتاريخًا صحيحين',background:'#0f172a'}); const t=currentFinanceTables(); const payment={case_id:activeCaseId, ...(t.stage?{stage_id:activeStageId}:{ }), amount,date,note,remote_id:generateUUID(),office_id:currentOfficeId}; const id=await t.payments.add(payment); await db.pendingOperations.add({operation:t.stage?'insert_stage_payment':'insert_payment',data:{...payment,id},timestamp:Date.now()}); await openFeesModal(activeCaseId); };
+window.addExpense = async function() { if (!ownerOnly('إضافة مصروف')) return; if (!activeCaseId) return; const amount=parseFloat(document.getElementById('expenseAmount').value), date=document.getElementById('expenseDate').value, category=document.getElementById('expenseCategory').value.trim(); if (!amount || amount<=0 || !date) return Swal.fire({icon:'warning',title:'تنبيه',text:'أدخل قيمة وتاريخًا صحيحين',background:'#0f172a'}); const t=currentFinanceTables(); const expense={office_id:currentOfficeId,owner_id:activeCaseId,case_id:activeCaseId,...(t.stage?{stage_id:activeStageId}:{}),amount,date,category,remote_id:generateUUID()}; const id=await t.expenses.add(expense); await db.pendingOperations.add({operation:t.stage?'insert_stage_expense':'insert_expense',data:{...expense,id},timestamp:Date.now()}); await openFeesModal(activeCaseId); };
+window.deletePayment = async function(id) { if (!ownerOnly('حذف دفعة')) return; const t=currentFinanceTables(); if (confirm('هل أنت متأكد من حذف الدفعة؟')) { await t.payments.delete(id); await openFeesModal(activeCaseId); } };
+window.deleteExpense = async function(id) { if (!ownerOnly('حذف المصروف')) return; const t=currentFinanceTables(); if (confirm('هل أنت متأكد من حذف المصروف؟')) { await t.expenses.delete(id); await openFeesModal(activeCaseId); } };
 window.openOfficeExpenseModal = function() {
     if (!ownerOnly('تسجيل مصروف المكتب')) return;
     document.getElementById('officeExpenseAmount').value = '';
