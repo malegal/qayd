@@ -356,7 +356,7 @@
                     <div class="cases-container">
                     <div class="cases-list">
                         <div class="filter-bar">
-                            <input type="text" id="caseSearchInput" class="form-control" placeholder="بحث باسم العميل أو المحكمة أو رقم الملف..." onkeyup="filterCasesList()">
+                            <input type="text" id="caseSearchInput" class="form-control" placeholder="بحث باسم العميل أو المحكمة أو رقم الملف..." oninput="formatCodeSearchInput(this); filterCasesList()">
                             <select id="courtFilter" class="form-select" onchange="filterCasesList()">
                                 <option value="">كل المحاكم</option>
                                 <option>محكمة الأسرة</option><option>المحكمة الجزئية</option><option>المحكمة الابتدائية</option>
@@ -464,7 +464,7 @@
                 </div>
                 <div class="card-glass text-center mb-4">
                     <h3 class="gold-text mb-3">البحث المتقدم</h3>
-                    <div class="input-group mx-auto" style="max-width: 600px;"><input id="searchInput" class="form-control form-control-lg" placeholder="بحث بالاسم، الهاتف، الرقم، الكود..." onkeyup="if(event.key === 'Enter') searchCases()"><button class="gold-btn" onclick="searchCases()">بحث</button></div>
+                    <div class="input-group mx-auto" style="max-width: 600px;"><input id="searchInput" class="form-control form-control-lg" placeholder="بحث بالاسم، الهاتف، الرقم، الكود..." oninput="formatCodeSearchInput(this)" onkeyup="if(event.key === 'Enter') searchCases()"><button class="gold-btn" onclick="searchCases()">بحث</button></div>
                 </div>
                 <div id="searchResults" class="row g-3"></div>
             </div>
@@ -478,7 +478,7 @@
         <div class="modal-header"><h5 class="modal-title gold-text"><i class="bi bi-search"></i> البحث المتقدم</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
         <div class="modal-body">
             <div class="row g-3">
-                <div class="col-md-4"><label>كلمة البحث</label><input id="advancedQuery" class="form-control" placeholder="اسم العميل، الكود، المحكمة، الخصم أو القرار"></div>
+                <div class="col-md-4"><label>كلمة البحث</label><input id="advancedQuery" class="form-control" oninput="formatCodeSearchInput(this)" placeholder="اسم العميل، الكود، المحكمة، الخصم أو القرار"></div>
                 <div class="col-md-2"><label>نوع الملف</label><select id="advancedFileType" class="form-select"><option value="">كل الملفات</option><option value="judicial">قضائي</option><option value="professional">مهني</option></select></div>
                 <div class="col-md-2"><label>الحالة</label><input id="advancedStatus" class="form-control" placeholder="مثال: مؤجلة أو مكتمل"></div>
                 <div class="col-md-2"><label>من تاريخ</label><input id="advancedFromDate" type="date" class="form-control"></div>

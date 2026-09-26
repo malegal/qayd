@@ -672,7 +672,8 @@ function filterCasesList() {
     const service = document.getElementById('serviceFilter')?.value || '';
     const filtered = allOfficeRecords.filter(record => {
         const haystack = [record.client_name, record.title, record.court_name, record.case_number, record.file_code, record.case_code].filter(Boolean).join(' ').toLowerCase();
-        return (!search || haystack.includes(search)) && (!court || record.court_name === court) && (!service || record.record_type === service);
+        const searchMatches = !search || codeSearchVariants(search).some(term => haystack.includes(term.toLowerCase())) || haystack.includes(search);
+        return searchMatches && (!court || record.court_name === court) && (!service || record.record_type === service);
     });
     const container = document.getElementById('casesListContainer');
     if (!container) return;
@@ -726,10 +727,36 @@ window.selectProfessionalFile = async function(id) {
     showCasePanelSection('data');
 };
 
+// كود موحد لكل الملفات القضائية والإدارية. تم اختيار MJ = Mahmoud Jad Elrab.
+const UNIFIED_CODE_PREFIX = 'MJ';
+const UNIFIED_CODE_PATTERN = /^(?:MJ|J|M)-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}$/;
+const LEGACY_CODE_PATTERN = /^JELR-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}$/;
+function codeSearchVariants(raw) {
+    const value = String(raw || '').trim().toUpperCase();
+    if (!value) return [];
+    const variants = new Set([value]);
+    const compact = value.replace(/[^A-Z0-9]/g, '');
+    if (/^\d{1,4}$/.test(compact)) variants.add(`${UNIFIED_CODE_PREFIX}-${String(new Date().getFullYear()).slice(-2)}-${compact.padStart(4, '0')}`);
+    else if (/^(?:MJ|J|M)?\d{6,8}$/.test(compact)) {
+        const digits = compact.replace(/^(?:MJ|J|M)/, '');
+        variants.add(`${UNIFIED_CODE_PREFIX}-${digits.slice(0, 2)}-${digits.slice(2).padStart(4, '0')}`);
+    }
+    const match = value.match(/^(?:MJ|J|M)?[- ]?(\d{2})[- ]?(\d{1,4})(.*)$/);
+    if (match) variants.add(`${UNIFIED_CODE_PREFIX}-${match[1]}-${match[2].padStart(4, '0')}${match[3] || ''}`);
+    return [...variants];
+}
+window.formatCodeSearchInput = function(input) {
+    const raw = String(input?.value || '').trim().toUpperCase();
+    if (/^(?:MJ|J|M)?[\d\- ]+$/.test(raw) && raw.replace(/\D/g, '').length <= 8 && raw.replace(/\D/g, '').length >= 1) {
+        const digits = raw.replace(/\D/g, '');
+        if (digits.length <= 4) input.value = `${UNIFIED_CODE_PREFIX}-${String(new Date().getFullYear()).slice(-2)}-${digits.padStart(4, '0')}`;
+        else input.value = `${UNIFIED_CODE_PREFIX}-${digits.slice(0, 2)}-${digits.slice(2).padStart(4, '0')}`;
+    }
+};
 // إضافة قضية جديدة
 // توليد كود القضية محليًا داخل qayd؛ قاعدة البيانات لا تنشئ الكود ولا تستبدله.
 async function generateCaseCode() {
-    const prefix = 'JELR'; // اختصار JAD ELRAB LAW FIRM للحفاظ على الهوية الموحدة.
+    const prefix = UNIFIED_CODE_PREFIX;
     const year = String(new Date().getFullYear()).slice(-2);
     const randomPart = () => {
         const bytes = new Uint8Array(4);
@@ -742,15 +769,15 @@ async function generateCaseCode() {
     for (let attempt = 0; attempt < 20; attempt += 1) {
         const sequence = String(localCount + attempt + 1).padStart(4, '0');
         const candidate = `${prefix}-${year}-${sequence}-${randomPart()}`;
-        if (!(await db.cases.where('case_code').equals(candidate).count())) return candidate;
+        if (!(await db.cases.where('case_code').equals(candidate).count()) && !(await db.officeFiles.where('file_code').equals(candidate).count())) return candidate;
     }
     throw new Error('تعذر توليد كود قضية محلي فريد');
 }
 
 // حاجز موحد يمنع الحفظ أو المزامنة أو إنشاء المجلد بدون كود صالح.
 function assertValidCaseCode(caseCode) {
-    if (typeof caseCode !== 'string' || !/^JELR-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}$/.test(caseCode.trim())) {
-        throw new Error('كود القضية غير موجود أو لا يطابق صيغة JELR المعتمدة');
+    if (typeof caseCode !== 'string' || !(UNIFIED_CODE_PATTERN.test(caseCode.trim()) || LEGACY_CODE_PATTERN.test(caseCode.trim()))) {
+        throw new Error('كود الملف غير موجود أو لا يطابق صيغة MJ المعتمدة');
     }
     return caseCode.trim();
 }
@@ -2282,19 +2309,17 @@ window.refreshNotificationsCenter = renderNotificationsCenter;
 // ========== 18. الملفات المهنية ==========
 // هذه الدوال تفصل الخدمات المهنية عن القضايا القضائية وتحافظ على التوليد المحلي للكود.
 function generateProfessionalFileCode(fileType) {
-    // القضائي محفوظ في جدول cases؛ هذه الأكواد للملفات الإجرائية والخدمية التي لا تملك جلسات محكمة.
-    const prefixMap = { prosecution_investigation: 'PI', detention_renewal: 'DR', dispute_committee: 'DC', grievance: 'GR', legal_procedure: 'PR', real_estate: 'RE', contract_writing: 'CT', company_formation: 'CO', administrative: 'AD' };
-    const prefix = prefixMap[fileType];
-    if (!prefix) throw new Error('نوع الملف المهني غير صالح');
+    const validTypes = ['prosecution_investigation', 'detention_renewal', 'dispute_committee', 'grievance', 'legal_procedure', 'real_estate', 'contract_writing', 'company_formation', 'administrative'];
+    if (!validTypes.includes(fileType)) throw new Error('نوع الملف المهني غير صالح');
     const year = String(new Date().getFullYear()).slice(-2);
-    const sequence = String(Date.now()).slice(-6).padStart(6, '0');
+    const sequence = String(Date.now()).slice(-4).padStart(4, '0');
     const random = Math.random().toString(36).slice(2, 8).toUpperCase();
-    return `${prefix}-${year}-${sequence}-${random}`;
+    return `${UNIFIED_CODE_PREFIX}-${year}-${sequence}-${random}`;
 }
 function assertValidProfessionalFileCode(code) {
     const normalized = String(code || '').trim().toUpperCase();
-    if (!/^(RE|CT|CO|PI|DR|DC|GR|PR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(normalized)) {
-        throw new Error('كود الملف المهني غير صالح');
+    if (!(UNIFIED_CODE_PATTERN.test(normalized) || /^(RE|CT|CO|PI|DR|DC|GR|PR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(normalized))) {
+        throw new Error('كود الملف غير صالح');
     }
     return normalized;
 }
@@ -2387,7 +2412,7 @@ const legalFileTypeLabels = { judicial: 'قضائي', real_estate: 'تسجيل �
 const legalFileStatusLabels = { new: 'جديد', submitting: 'قيد الرفع', in_progress: 'قيد العمل', needs_action: 'يحتاج إجراء', on_hold: 'متوقف', completed: 'مكتمل', archived: 'مؤرشف', open: 'جديد' };
 function normalizeLegalFileStatus(status) { const value = String(status || '').trim(); return value === 'open' || !legalFileStatusLabels[value] ? 'new' : value; }
 const proceedingTypeLabels = { first_instance: 'أول درجة', appeal: 'استئناف', cassation: 'نقض', retrial: 'إعادة نظر', opposition: 'معارضة', enforcement: 'تنفيذ', execution_objection: 'إشكال تنفيذ', other: 'أخرى' };
-function generateLegalFileCode(type) { const prefix = { judicial: 'JU', real_estate: 'RE', corporate: 'CO', power_of_attorney: 'PO', contract: 'CT', legal_consultation: 'LC', government_service: 'GS', enforcement: 'EX', other: 'OT' }[type] || 'OT'; return `${prefix}-${String(new Date().getFullYear()).slice(-2)}-${String(Date.now()).slice(-6)}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`; }
+function generateLegalFileCode(type) { const year = String(new Date().getFullYear()).slice(-2); const sequence = String(Date.now()).slice(-4).padStart(4, '0'); return `${UNIFIED_CODE_PREFIX}-${year}-${sequence}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`; }
 window.openLegalFileModal = function() {
     if (!ownerOnly('إنشاء ملف قانوني')) return;
     ['legalFileTitle','legalFileClient','legalFilePhone','legalFileDescription','legalCourt','legalCaseNumber','legalActionType','legalAuthority','legalFollowup'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });

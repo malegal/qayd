@@ -69,7 +69,7 @@ ipcMain.handle('repair-indexeddb', async () => {
 ipcMain.handle('create-case-folder', async (event, caseCode, clientName, caseData) => {
     try {
         // حماية المستوى الرئيسي: لا يُنشأ مجلد أو ملف قضية خارج صيغة كود qayd المعتمدة.
-        if (typeof caseCode !== 'string' || !/^JELR-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}$/.test(caseCode.trim())) {
+        if (typeof caseCode !== 'string' || !/^(?:(?:MJ|J|M)-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}|JELR-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6})$/.test(caseCode.trim())) {
             return { success: false, error: 'لا يمكن إنشاء مجلد بدون case_code صالح من qayd' };
         }
         if (!caseData || caseData.case_code !== caseCode.trim()) {
@@ -94,7 +94,7 @@ ipcMain.handle('create-case-folder', async (event, caseCode, clientName, caseDat
 // إنشاء مجلد فرعي للمرحلة داخل مجلد القضية نفسه؛ لا ينشئ مجلداً رئيسياً أو كوداً جديداً.
 ipcMain.handle('create-case-stage-folder', async (event, caseCode, clientName, stageData) => {
     try {
-        if (typeof caseCode !== 'string' || !/^JELR-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}$/.test(caseCode.trim())) return { success: false, error: 'كود القضية غير صالح' };
+        if (typeof caseCode !== 'string' || !/^(?:(?:MJ|J|M)-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}|JELR-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6})$/.test(caseCode.trim())) return { success: false, error: 'كود القضية غير صالح' };
         if (!stageData || stageData.case_id == null || !stageData.stage_type) return { success: false, error: 'بيانات المرحلة ناقصة' };
         const docsPath = app.getPath('documents');
         const caseFolder = path.join(docsPath, 'مكتب المحامي', 'القضايا', `${caseCode.trim()} - ${String(clientName || 'عميل').replace(/[<>:"/\\|?*]/g, '_')}`);
@@ -110,7 +110,7 @@ ipcMain.handle('create-case-stage-folder', async (event, caseCode, clientName, s
 });
 ipcMain.handle('open-case-stage-folder', async (event, caseCode, clientName, stageData) => {
     try {
-        if (typeof caseCode !== 'string' || !/^JELR-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}$/.test(caseCode.trim())) return { success: false, error: 'كود القضية غير صالح' };
+        if (typeof caseCode !== 'string' || !/^(?:(?:MJ|J|M)-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}|JELR-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6})$/.test(caseCode.trim())) return { success: false, error: 'كود القضية غير صالح' };
         if (!stageData || stageData.case_id == null || !stageData.stage_type) return { success: false, error: 'بيانات المرحلة ناقصة' };
         const docsPath = app.getPath('documents');
         const safeClient = String(clientName || 'عميل').replace(/[<>:"/\\|?*]/g, '_');
@@ -289,7 +289,7 @@ ipcMain.handle('copy-case-document', async (event, sourcePaths, caseCode, client
     try {
         const paths = Array.isArray(sourcePaths) ? sourcePaths : [sourcePaths];
         if (!paths.length || paths.some(source => !source || !fs.existsSync(source))) return { success: false, error: 'أحد المستندات المصدر غير موجود' };
-        if (typeof caseCode !== 'string' || !/^JELR-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}$/.test(caseCode.trim())) return { success: false, error: 'كود القضية غير صالح' };
+        if (typeof caseCode !== 'string' || !/^(?:(?:MJ|J|M)-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}|JELR-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6})$/.test(caseCode.trim())) return { success: false, error: 'كود القضية غير صالح' };
         const safeClient = String(clientName || 'عميل').replace(/[<>:"/\\|?*]/g, '_');
         const targetDir = path.join(app.getPath('documents'), 'مكتب المحامي', 'القضايا', `${caseCode.trim()} - ${safeClient}`, 'مستندات العميل');
         fs.mkdirSync(targetDir, { recursive: true });
