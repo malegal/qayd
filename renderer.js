@@ -116,6 +116,9 @@ db.version(14).stores({
     caseStages: 'id, case_id, office_id, stage_type, case_number, case_year, created_at',
     sessions: 'id, office_id, case_id, stage_id, session_date, case_status, decision'
 });
+db.version(15).stores({
+    caseStages: 'id, case_id, office_id, legacy_case_id, stage_type, case_number, case_year, created_at'
+});
 
 let supabaseClient = null;
 let currentOfficeId = null;
@@ -627,9 +630,33 @@ async function checkUpcomingNotifications() {
 // ========== 8. إدارة المكتب ==========
 let allCasesList = [];
 let allOfficeRecords = [];
+function isVisibleCaseRecord(c) { return !c.parent_case_id && !c.appeal_of_case_id; }
+async function migrateLegacyStageCases() {
+    if (!currentOfficeId || !db.caseStages) return;
+    const legacy = await db.cases.filter(c => c.office_id === currentOfficeId && !c.archived && (c.parent_case_id || c.appeal_of_case_id)).toArray();
+    for (const child of legacy) {
+        const parentId = child.parent_case_id || child.appeal_of_case_id;
+        const parent = await db.cases.get(parentId);
+        if (!parent || parent.office_id !== currentOfficeId) continue;
+        let stage = await db.caseStages.filter(x => x.legacy_case_id === child.id).first();
+        if (!stage) {
+            stage = { id: 'STG_' + child.id, case_id: parent.id, office_id: currentOfficeId, legacy_case_id: child.id, stage_type: child.proceeding_type || 'appeal', case_number: child.case_number || '', case_year: child.case_year || '', court_name: child.court_name || '', circuit: child.circuit || '', client_role: child.client_role || parent.client_role || '', opponent_role: child.opponent_role || parent.opponent_role || '', judgment_date: child.judgment_date || null, judgment_summary: child.judgment_summary || null, created_at: child.created_at || new Date().toISOString(), updated_at: new Date().toISOString() };
+            await db.caseStages.put(stage);
+            await db.pendingOperations.add({ operation: 'insert_case_stage', data: stage, timestamp: Date.now() });
+        }
+        const childSessions = await db.sessions.where('case_id').equals(child.id).toArray();
+        for (const session of childSessions) {
+            await db.sessions.update(session.id, { case_id: parent.id, stage_id: stage.id });
+            await db.pendingOperations.add({ operation: 'update_session', data: { id: session.id, case_id: parent.id, stage_id: stage.id }, timestamp: Date.now() });
+        }
+        await db.cases.update(child.id, { archived: 1 });
+        await db.pendingOperations.add({ operation: 'update_case', data: { id: child.id, case_code: child.case_code, archived: 1 }, timestamp: Date.now() });
+    }
+}
 window.loadCasesList = async function() {
     try {
-        allCasesList = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).toArray();
+        await migrateLegacyStageCases();
+        allCasesList = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId && isVisibleCaseRecord(c)).toArray();
         const professionalFiles = await db.officeFiles.where('office_id').equals(currentOfficeId).filter(f => !f.archived).toArray();
         allOfficeRecords = [...allCasesList.map(c => ({ ...c, record_type: 'judicial' })), ...professionalFiles.map(f => ({ ...f, record_type: f.file_type }))];
         filterCasesList();
@@ -879,7 +906,7 @@ window.openNotes = async function() {
 window.searchCasesForSession = async function(q) {
     if (q.length < 2) { document.getElementById('caseSearchResults').style.display = 'none'; return; }
     try {
-        const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).filter(c => String(c.client_name).includes(q) || String(c.case_number).includes(q) || String(c.case_code).toLowerCase().includes(q.toLowerCase())).limit(10).toArray();
+        const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId && isVisibleCaseRecord(c)).filter(c => String(c.client_name).includes(q) || String(c.case_number).includes(q) || String(c.case_code).toLowerCase().includes(q.toLowerCase())).limit(10).toArray();
         let html = cases.map(c => `<div class="p-2 border-bottom border-secondary text-white" style="cursor:pointer" onclick="selectCaseForSession('${c.id}')"><span class="text-warning">${c.case_code}</span> - ${c.client_name} (${c.case_number})</div>`).join('');
         const resDiv = document.getElementById('caseSearchResults');
         resDiv.innerHTML = html; resDiv.style.display = html ? 'block' : 'none';
@@ -1158,7 +1185,7 @@ window.openArchivedCaseFolder = async function(folderName) { if (!ipcRenderer) r
 window.permanentlyDeleteArchived = async function(id) { const caseData = await db.cases.get(id); const confirm = await Swal.fire({ title: 'تأكيد الحذف النهائي', text: `هل أنت متأكد من حذف "${caseData.client_name}" نهائياً؟`, icon: 'warning', showCancelButton: true, confirmButtonColor: '#dc3545', confirmButtonText: 'نعم', cancelButtonText: 'إلغاء', background: '#0f172a', color: '#fff' }); if (confirm.isConfirmed) await deleteCasePermanently(id); loadArchivedCases(); };
 
 // ========== 13. الإحصائيات و PDF ==========
-window.loadStats = async function() { try { const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).toArray(); const files = await db.officeFiles.where('office_id').equals(currentOfficeId).filter(f => !f.archived).toArray(); const sessions = await db.sessions.filter(s => s.office_id === currentOfficeId).toArray(); document.getElementById('stat-cases').innerText = cases.length + files.length; document.getElementById('stat-total-s').innerText = sessions.length; document.getElementById('stat-clients').innerText = new Set([...cases, ...files].map(c => c.client_name)).size; } catch (e) { console.error('تعذر تحميل إحصاءات المكتب', e); } };
+window.loadStats = async function() { try { const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId && isVisibleCaseRecord(c)).toArray(); const files = await db.officeFiles.where('office_id').equals(currentOfficeId).filter(f => !f.archived).toArray(); const sessions = await db.sessions.filter(s => s.office_id === currentOfficeId).toArray(); document.getElementById('stat-cases').innerText = cases.length + files.length; document.getElementById('stat-total-s').innerText = sessions.length; document.getElementById('stat-clients').innerText = new Set([...cases, ...files].map(c => c.client_name)).size; } catch (e) { console.error('تعذر تحميل إحصاءات المكتب', e); } };
 window.printCasePDF = async function() { if (!currentCaseForPrint) return; const rows=(currentCaseForPrint.sessions||[]).map(x=>`<li>${new Date(x.session_date).toLocaleString('ar-EG')} — ${escapeHtml(x.case_status||'')} — ${escapeHtml(x.decision||'')}</li>`).join('')||'<li>لا توجد جلسات مسجلة</li>'; const html=`<html dir="rtl"><meta charset="utf-8"><style>body{font-family:Arial,'Noto Sans Arabic',sans-serif;direction:rtl;padding:30px;color:#172b45}.print-head{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #be9124;padding-bottom:10px;margin-bottom:16px}.print-head .office{font-weight:900;color:#12335b;font-size:20px}.print-head .meta{font-size:12px;color:#53657d}h1{text-align:center;color:#12335b}li{margin:10px 0}.print-foot{margin-top:26px;border-top:1px solid #d9e1eb;padding-top:8px;font-size:11px;color:#53657d;text-align:center}</style><div class="print-head"><div class="office">${escapeHtml(currentOfficeName||'مكتب المحاماة')}</div><div class="meta">تاريخ الطباعة: ${new Date().toLocaleString('ar-EG')}</div></div><h1>تقرير القضية</h1><p>العميل: ${escapeHtml(currentCaseForPrint.client_name)}</p><p>رقم القضية: ${escapeHtml(currentCaseForPrint.case_number)}/${escapeHtml(currentCaseForPrint.case_year)}</p><p>المحكمة: ${escapeHtml(currentCaseForPrint.court_name)}</p><p>كود القضية: ${escapeHtml(currentCaseForPrint.case_code||'')}</p><h2>سجل الجلسات</h2><ul>${rows}</ul><div class="print-foot">نظام قيد لإدارة الملفات القانونية</div></html>`; if (ipcRenderer?.printArabicPdf) await ipcRenderer.printArabicPdf(html, `قضية_${currentCaseForPrint.case_number||'تقرير'}.pdf`); };
 
 // ========== 14. المزامنة مع Supabase ==========
@@ -1836,7 +1863,7 @@ let financeRows = [];
 function money(value) { return (Number(value) || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 async function getFinanceRows() {
     const ledger = await db.financialTransactions.where('office_id').equals(currentOfficeId).toArray();
-    const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).toArray();
+    const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId && isVisibleCaseRecord(c)).toArray();
     const files = await db.officeFiles.filter(f => !f.archived && f.office_id === currentOfficeId).toArray();
     const records = [...cases.map(c => ({ ...c, record_kind: 'judicial', record_id: c.id, title: `قضية ${c.case_number || ''}/${c.case_year || ''}`, service: `${c.court_name || '-'}${c.circuit ? ` / ${c.circuit}` : ''}`, code: c.case_code || '', scope: 'case' })), ...files.map(f => ({ ...f, record_kind: 'professional', record_id: f.id, title: f.title || professionalTypeLabel(f.file_type), service: professionalTypeLabel(f.file_type), code: f.file_code || '', scope: 'file' }))];
     const rows = records.map(record => { const related = ledger.filter(x => (record.scope === 'case' ? x.case_id === record.record_id : x.office_file_id === record.record_id)); const total = related.filter(x => x.transaction_type === 'income').reduce((n,x) => n + Number(x.amount || 0), 0); const spent = related.filter(x => x.transaction_type === 'expense').reduce((n,x) => n + Number(x.amount || 0), 0); return { ...record, total, collected: total, spent, profit: total - spent }; });
@@ -1865,7 +1892,7 @@ async function loadRecentCases() {
     try {
         const container = document.getElementById('recentCasesList');
         if (!container) return;
-        const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).reverse().limit(12).toArray();
+        const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId && isVisibleCaseRecord(c)).reverse().limit(12).toArray();
         let html = '';
         for (let c of cases) {
             html += `<div class="case-card mb-2" onclick="openCaseDetails('${c.id}')">
@@ -1878,7 +1905,7 @@ async function loadRecentCases() {
         container.innerHTML = html || '<p class="text-muted">لا توجد قضايا</p>';
     } catch (e) { console.error(e); }
 }
-window.searchCases = async function() { const q = document.getElementById('searchInput').value.trim().toLowerCase(); if (!q) return; try { const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).filter(c => String(c.client_name || '').toLowerCase().includes(q) || String(c.case_number || '').includes(q) || String(c.client_phone || '').includes(q) || String(c.case_code || '').toLowerCase().includes(q)).toArray(); let html = ''; for (let c of cases) { const sessions = await db.sessions.where('case_id').equals(c.id).toArray(); sessions.sort((a, b) => new Date(b.session_date) - new Date(a.session_date)); const lastStatus = sessions.length > 0 ? sessions[0].case_status : 'جديدة'; html += `<div class="col-md-4"><div class="case-card" onclick="openCaseDetails('${c.id}')"><div class="d-flex justify-content-between align-items-start"><div><h5 class="gold-text mb-1">${c.client_name}</h5><p class="mb-0 text-white-50 small">كود: ${c.case_code}</p></div><span class="case-status status-new">${lastStatus}</span></div><p class="mb-0 text-white-50 mt-2">رقم: ${c.case_number}/${c.case_year}</p></div></div>`; } document.getElementById('searchResults').innerHTML = html || '<div class="col-12 text-center text-muted">لا توجد نتائج</div>'; } catch (e) { } };
+window.searchCases = async function() { const q = document.getElementById('searchInput').value.trim().toLowerCase(); if (!q) return; try { const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId && isVisibleCaseRecord(c)).filter(c => String(c.client_name || '').toLowerCase().includes(q) || String(c.case_number || '').includes(q) || String(c.client_phone || '').includes(q) || String(c.case_code || '').toLowerCase().includes(q)).toArray(); let html = ''; for (let c of cases) { const sessions = await db.sessions.where('case_id').equals(c.id).toArray(); sessions.sort((a, b) => new Date(b.session_date) - new Date(a.session_date)); const lastStatus = sessions.length > 0 ? sessions[0].case_status : 'جديدة'; html += `<div class="col-md-4"><div class="case-card" onclick="openCaseDetails('${c.id}')"><div class="d-flex justify-content-between align-items-start"><div><h5 class="gold-text mb-1">${c.client_name}</h5><p class="mb-0 text-white-50 small">كود: ${c.case_code}</p></div><span class="case-status status-new">${lastStatus}</span></div><p class="mb-0 text-white-50 mt-2">رقم: ${c.case_number}/${c.case_year}</p></div></div>`; } document.getElementById('searchResults').innerHTML = html || '<div class="col-12 text-center text-muted">لا توجد نتائج</div>'; } catch (e) { } };
 
 // ========== البحث الحي الموحّد (D1) ==========
 // يبحث فوراً في القضايا والملفات القضائية والمهنية والجلسات والمهام والأحداث وملاحظات الفريق.
@@ -2038,7 +2065,7 @@ window.runAdvancedSearch = async function() {
     try {
         const results = [];
         if (type !== 'professional') {
-            const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).toArray();
+            const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId && isVisibleCaseRecord(c)).toArray();
             const sessions = await db.sessions.where('office_id').equals(currentOfficeId).toArray();
             const sessionsByCase = sessions.reduce((map, session) => { (map[session.case_id] ||= []).push(session); return map; }, {});
             for (const c of cases) {
