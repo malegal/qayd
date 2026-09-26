@@ -2552,7 +2552,7 @@ function partyRowsWithoutPrimary(rows, primaryName) {
 }
 function stageHistoryHtml(caseRow, stages, currentStageId) {
     const initial = `<div class="border-bottom py-2 ${!currentStageId ? 'fw-bold text-success' : ''}"><span class="badge ${!currentStageId ? 'bg-success' : 'bg-secondary'}">${!currentStageId ? 'الحالية' : 'تاريخية'}</span> <button class="btn btn-link p-0" onclick="openCaseDetails('${escapeHtml(caseRow.id)}')">${STAGE_LABELS[caseRow.proceeding_type] || 'أول درجة'} — ${escapeHtml(caseRow.case_number || '-')}/${escapeHtml(caseRow.case_year || '-')}</button>${caseRow.judgment_summary ? `<div class="small text-muted">الحكم: ${escapeHtml(caseRow.judgment_summary)}</div>` : ''}</div>`;
-    const rows = stages.map(stage => { const current = String(stage.id) === String(currentStageId); return `<div class="border-bottom py-2 ${current ? 'fw-bold text-success' : ''}"><span class="badge ${current ? 'bg-success' : 'bg-secondary'}">${current ? 'الحالية' : 'تاريخية'}</span> <button class="btn btn-link p-0" onclick="openCaseDetails('${escapeHtml(caseRow.id)}','${escapeHtml(stage.id)}')">${escapeHtml(STAGE_LABELS[stage.stage_type] || stage.stage_type || 'مرحلة')} — ${escapeHtml(stage.case_number || '-')}/${escapeHtml(stage.case_year || '-')}</button>${stage.judgment_summary ? `<div class="small text-muted">الحكم: ${escapeHtml(stage.judgment_summary)}</div>` : ''}</div>`; }).join('');
+    const rows = stages.map(stage => { const current = String(stage.id) === String(currentStageId); return `<div class="border-bottom py-2 ${current ? 'fw-bold text-success' : ''}"><span class="badge ${current ? 'bg-success' : 'bg-secondary'}">${current ? 'الحالية' : 'تاريخية'}</span> <button class="btn btn-link p-0" onclick="openCaseDetails('${escapeHtml(caseRow.id)}','${escapeHtml(stage.id)}')">${escapeHtml(STAGE_LABELS[stage.stage_type] || stage.stage_type || 'مرحلة')} — ${escapeHtml(stage.case_number || '-')}/${escapeHtml(stage.case_year || '-')}</button>${stage.judgment_summary ? `<div class="small text-muted">الحكم: ${escapeHtml(stage.judgment_summary)}</div>` : ''}<button class="btn btn-sm btn-outline-secondary mt-1" onclick="openStageFolder('${escapeHtml(caseRow.id)}','${escapeHtml(stage.id)}'); event.stopPropagation();">فتح مجلد المرحلة</button></div>`; }).join('');
     return `<div class="party-card mt-3"><h6 class="gold-text"><i class="bi bi-clock-history"></i> سجل المراحل القضائية داخل نفس القضية</h6>${initial}${rows}</div>`;
 }
 const baseOpenCaseDetails = window.openCaseDetails;
@@ -2582,6 +2582,12 @@ window.openCaseDetails = async function(caseId, requestedStageId = null) {
     if (actions) { actions.innerHTML = detailActionsHtml(true, caseId); if (currentUserRole === 'manager' && (view.status === 'تم الحكم' || view.judgment_summary || caseRow.status === 'تم الحكم')) actions.insertAdjacentHTML('beforeend', '<button id="addStageFromPanel" class="btn btn-outline-primary" onclick="addCaseStage(activeCaseId)"><i class="bi bi-diagram-3"></i> إضافة مرحلة تاريخية</button>'); }
     showCasePanelSection('data');
 };
+window.openStageFolder = async function(caseId, stageId) {
+    const caseRow = await db.cases.get(caseId); const stage = await db.caseStages.get(stageId);
+    if (!caseRow || !stage || !ipcRenderer?.openCaseStageFolder) return;
+    const result = await ipcRenderer.openCaseStageFolder(caseRow.case_code, caseRow.client_name, stage);
+    if (!result?.success) Swal.fire('تعذر فتح مجلد المرحلة', result?.error || 'المجلد غير موجود', 'warning');
+};
 window.addCaseStage = async function(caseId) {
     if (!ownerOnly('إضافة مرحلة تقاضٍ')) return;
     const parent = await db.cases.get(caseId); if (!parent) return;
@@ -2591,6 +2597,10 @@ window.addCaseStage = async function(caseId) {
     const stage = { id: generateUUID(), case_id: caseId, office_id: currentOfficeId, stage_type:d.type, case_number:d.number, case_year:d.year, court_name:d.court, circuit:d.circuit, client_role:d.clientRole, opponent_role:d.opponentRole, judgment_date:null, judgment_summary:null, created_at:new Date().toISOString(), updated_at:new Date().toISOString() };
     await db.caseStages.add(stage);
     await db.pendingOperations.add({ operation:'insert_case_stage', data:stage, timestamp:Date.now() });
+    if (ipcRenderer?.createCaseStageFolder) {
+        const folderResult = await ipcRenderer.createCaseStageFolder(parent.case_code, parent.client_name, stage);
+        if (!folderResult?.success) console.warn('تعذر إنشاء مجلد المرحلة محلياً:', folderResult?.error);
+    }
     await openCaseDetails(caseId, stage.id);
     Swal.fire({ icon:'success', title:'تم حفظ المرحلة التاريخية', text:'احتفظت القضية بنفس الكود والمجلد. أضف الجلسات الآن.', timer:2200, showConfirmButton:false });
 };

@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     repairIndexedDB: () => ipcRenderer.invoke('repair-indexeddb'),
   // إدارة المجلدات
   createCaseFolder: (caseCode, clientName, caseData) => ipcRenderer.invoke('create-case-folder', caseCode, clientName, caseData),
+  createCaseStageFolder: (caseCode, clientName, stageData) => ipcRenderer.invoke('create-case-stage-folder', caseCode, clientName, stageData),
+  openCaseStageFolder: (caseCode, clientName, stageData) => ipcRenderer.invoke('open-case-stage-folder', caseCode, clientName, stageData),
                                 openCaseFolder: (folderName) => ipcRenderer.invoke('open-case-folder', folderName),
                                 archiveCaseFolder: (folderName) => ipcRenderer.invoke('archive-case-folder', folderName),
                                 deleteCaseFolder: (folderName) => ipcRenderer.invoke('delete-case-folder', folderName),
