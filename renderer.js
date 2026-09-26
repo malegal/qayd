@@ -529,6 +529,13 @@ window.recoverOffice = async function() {
 };
 
 // ========== 6. تسجيل الدخول بـ PIN ==========
+const LOCAL_RESET_MARKER = 'qayd_private_office_reset_2026_09_27_v1';
+async function resetLocalOperationalDataAfterRemoteReset() {
+    if (localStorage.getItem(LOCAL_RESET_MARKER) === 'done') return;
+    const tables = [db.cases, db.sessions, db.fees, db.payments, db.events, db.tasks, db.pendingOperations, db.officeFiles, db.fileEvents, db.expenses, db.receipts, db.financialTransactions, db.notes, db.legalFiles, db.proceedings, db.serviceActions, db.approvalRequests, db.auditLogs, db.syncConflicts, db.caseParties, db.sessionChangeLog, db.caseStages, db.stageFees, db.stagePayments, db.stageExpenses];
+    for (const table of tables) if (table) await table.clear();
+    localStorage.setItem(LOCAL_RESET_MARKER, 'done');
+}
 async function checkOfficeSetup() {
     const offices = await db.offices.toArray();
     if (offices.length > 0) {
@@ -2285,6 +2292,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const hasOffice = await checkOfficeSetup();
     if (!hasOffice) showModal('officeSetupModal');
     if (hasOffice) {
+        await resetLocalOperationalDataAfterRemoteReset();
         runBackgroundSync();
         scheduleBackgroundSync();
         window.addEventListener('focus', runBackgroundSync);
