@@ -126,34 +126,34 @@
   function injectStyles() {
     if (document.getElementById('qmf-style')) return;
     const css = `
-    .qmf-search { display:flex; align-items:center; gap:0; background:#0b1626; border:1px solid #2b3b52; border-radius:10px; overflow:hidden; }
+    .qmf-search { display:flex; align-items:center; gap:0; background:#ffffff; border:1px solid #d9e1eb; border-radius:10px; overflow:hidden; }
     .qmf-search .qmf-prefix { background:linear-gradient(135deg,#be9124,#d5b04c); color:#0f172a; font-weight:900; padding:10px 12px; letter-spacing:1px; }
-    .qmf-search input { flex:1; border:0; background:transparent; color:#fff; padding:10px 12px; outline:none; font-weight:700; letter-spacing:1px; }
+    .qmf-search input { flex:1; border:0; background:transparent; color:#1c2b3f; padding:10px 12px; outline:none; font-weight:700; letter-spacing:1px; }
     .qmf-search input::placeholder { color:#7d8ea6; font-weight:500; letter-spacing:0; }
-    .qmf-card { background:#0f1b2e; border:1px solid #26364d; border-right:5px solid #be9124; border-radius:12px; padding:14px 16px; margin-bottom:12px; cursor:pointer; transition:.15s; }
-    .qmf-card:hover { background:#14233a; transform:translateY(-1px); }
-    .qmf-card .qmf-code { font-weight:900; color:#f0c14b; letter-spacing:1px; font-size:1.05rem; }
-    .qmf-card .qmf-title { color:#fff; font-weight:700; }
-    .qmf-card .qmf-meta { color:#9fb0c7; font-size:.85rem; margin-top:4px; }
+    .qmf-card { background:#ffffff; border:1px solid #d9e1eb; border-right:5px solid #be9124; border-radius:12px; padding:14px 16px; margin-bottom:12px; cursor:pointer; transition:.15s; }
+    .qmf-card:hover { background:#fffaf0; transform:translateY(-1px); }
+    .qmf-card .qmf-code { font-weight:900; color:#8a6814; letter-spacing:1px; font-size:1.05rem; }
+    .qmf-card .qmf-title { color:#1c2b3f; font-weight:700; }
+    .qmf-card .qmf-meta { color:#53657d; font-size:.85rem; margin-top:4px; }
     .qmf-badge { display:inline-block; padding:2px 10px; border-radius:20px; font-size:.75rem; font-weight:700; }
     .qmf-badge.judicial { background:#1e3a8a; color:#dbeafe; }
     .qmf-badge.professional { background:#065f46; color:#d1fae5; }
     .qmf-badge.general { background:#7c2d12; color:#ffedd5; }
-    .qmf-stage { background:#101d31; border:1px solid #26364d; border-right:5px solid #3b82f6; border-radius:10px; padding:12px 14px; margin-bottom:12px; }
-    .qmf-stage.current { border-right-color:#16a34a; background:#0e2419; }
+    .qmf-stage { background:#ffffff; border:1px solid #d9e1eb; border-right:5px solid #3b82f6; border-radius:10px; padding:12px 14px; margin-bottom:12px; }
+    .qmf-stage.current { border-right-color:#16a34a; background:#f0fdf4; }
     .qmf-stage .qmf-stage-head { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; }
-    .qmf-stage .qmf-stage-head h5 { margin:0; color:#f0c14b; font-weight:800; font-size:1rem; }
-    .qmf-stage .qmf-stage-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:5px 12px; margin-top:8px; font-size:.88rem; color:#cdd9ea; }
-    .qmf-stage .qmf-stage-grid b { color:#9fb0c7; font-weight:600; }
+    .qmf-stage .qmf-stage-head h5 { margin:0; color:#8a6814; font-weight:800; font-size:1rem; }
+    .qmf-stage .qmf-stage-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:5px 12px; margin-top:8px; font-size:.88rem; color:#1c2b3f; }
+    .qmf-stage .qmf-stage-grid b { color:#53657d; font-weight:600; }
     .qmf-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
     .qmf-actions .btn { font-size:.82rem; }
-    .qmf-judgment { background:#1a1206; border:1px dashed #be9124; border-radius:8px; padding:8px 10px; margin-top:8px; color:#f5e3b3; font-size:.88rem; }
-    .qmf-empty { text-align:center; color:#7d8ea6; padding:26px; }
-    .qmf-section-title { color:#f0c14b; font-weight:800; margin:16px 0 8px; display:flex; align-items:center; gap:8px; }
+    .qmf-judgment { background:#fff8e6; border:1px dashed #be9124; border-radius:8px; padding:8px 10px; margin-top:8px; color:#5b4610; font-size:.88rem; }
+    .qmf-empty { text-align:center; color:#53657d; padding:26px; }
+    .qmf-section-title { color:#8a6814; font-weight:800; margin:16px 0 8px; display:flex; align-items:center; gap:8px; }
     .qmf-fee-summary { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:10px 0; }
-    .qmf-fee-summary .box { background:#0b1626; border:1px solid #26364d; border-radius:10px; padding:10px; text-align:center; }
+    .qmf-fee-summary .box { background:#ffffff; border:1px solid #d9e1eb; border-radius:10px; padding:10px; text-align:center; }
     .qmf-fee-summary .box .v { font-size:1.15rem; font-weight:900; }
-    .qmf-fee-summary .box .k { color:#9fb0c7; font-size:.78rem; }
+    .qmf-fee-summary .box .k { color:#53657d; font-size:.78rem; }
     `;
     const style = document.createElement('style');
     style.id = 'qmf-style';
@@ -174,7 +174,7 @@
         <div class="modal-content bg-dark text-white">
           <div class="modal-header">
             <h5 class="modal-title gold-text"><i class="bi bi-folder2-open"></i> الملفات الرئيسية (MJ)</h5>
-            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
           </div>
           <div class="modal-body">
             <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
@@ -196,7 +196,7 @@
         <div class="modal-content bg-dark text-white">
           <div class="modal-header">
             <h5 class="modal-title gold-text"><i class="bi bi-folder-plus"></i> إنشاء ملف رئيسي</h5>
-            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
           </div>
           <div class="modal-body">
             <div class="row g-3">
@@ -272,7 +272,7 @@
         <div class="modal-content bg-dark text-white">
           <div class="modal-header">
             <h5 class="modal-title gold-text" id="qmfDetailsTitle">تفاصيل الملف</h5>
-            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
           </div>
           <div class="modal-body" id="qmfDetailsBody"></div>
         </div>
@@ -285,7 +285,7 @@
         <div class="modal-content bg-dark text-white">
           <div class="modal-header">
             <h5 class="modal-title gold-text"><i class="bi bi-diagram-3"></i> إضافة مرحلة جديدة</h5>
-            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
           </div>
           <div class="modal-body">
             <div class="row g-3">
@@ -345,6 +345,34 @@
   /* ============================================================
    * 7) قائمة الملفات الرئيسية + البحث ببادئة ثابتة
    * ============================================================ */
+  async function loadStagesForFile(fileId) {
+    const { db } = G();
+    let stages = [];
+    try { stages = await db.cases.filter(c => c.legal_file_id === fileId).toArray(); } catch (e) { stages = []; }
+    if (stages.length) return stages;
+    try {
+      const proceedings = await db.proceedings.filter(p => p.legal_file_id === fileId).toArray();
+      return proceedings.map(p => ({
+        id: p.id,
+        legal_file_id: p.legal_file_id,
+        stage_kind: p.metadata?.stage_kind || p.proceeding_type || 'first_instance',
+        proceeding_type: p.proceeding_type,
+        stage_order: Number(p.metadata?.stage_order ?? 0),
+        case_number: p.case_number,
+        case_year: p.case_year,
+        court_name: p.court_name,
+        circuit: p.circuit,
+        city: p.city,
+        client_role: p.client_position,
+        opponent_role: p.opponent_position,
+        opponent_name: p.opponent_name,
+        status: p.status,
+        created_at: p.created_at,
+        updated_at: p.updated_at,
+        source_proceeding_only: true
+      }));
+    } catch (e) { return []; }
+  }
   async function renderList(query) {
     const { db, esc, officeId } = G();
     const host = document.getElementById('qmfFilesList');
@@ -364,7 +392,7 @@
     const cards = [];
     for (const f of files) {
       let stages = [];
-      try { stages = await db.cases.filter(c => c.legal_file_id === f.id).toArray(); } catch (e) { stages = []; }
+      stages = await loadStagesForFile(f.id);
       const cat = f.file_category || categoryOf(f.file_type);
       const current = stages.slice().sort((a, b) => (STAGE_KINDS[b.stage_kind] ? STAGE_KINDS[b.stage_kind].order : 0) - (STAGE_KINDS[a.stage_kind] ? STAGE_KINDS[a.stage_kind].order : 0))[0];
       cards.push(`
@@ -513,7 +541,7 @@
         const total = parseFloat(document.getElementById('qmf_fee_total').value) || 0;
         const paid = parseFloat(document.getElementById('qmf_fee_paid').value) || 0;
         if (total > 0 || paid > 0) {
-          await db.fees.put({ case_id: stage.id, total, paid, remaining: total - paid, notes: document.getElementById('qmf_fee_notes').value.trim() });
+          await db.fees.put({ case_id: stage.id, legal_file_id: mainFile.id, stage_id: stage.id, scope: 'stage', total, paid, remaining: Math.max(0, total - paid), notes: document.getElementById('qmf_fee_notes').value.trim() });
           if (paid > 0) await db.payments.add({ case_id: stage.id, amount: paid, date: now.slice(0, 10), note: 'دفعة مقدمة' });
         }
       } else {
@@ -536,7 +564,7 @@
         const total = parseFloat(document.getElementById('qmf_fee_total').value) || 0;
         const paid = parseFloat(document.getElementById('qmf_fee_paid').value) || 0;
         if (total > 0 || paid > 0) {
-          await db.fees.put({ case_id: mainFile.id, total, paid, remaining: total - paid, notes: document.getElementById('qmf_fee_notes').value.trim() });
+          await db.fees.put({ case_id: mainFile.id, legal_file_id: mainFile.id, stage_id: null, scope: 'file', total, paid, remaining: Math.max(0, total - paid), notes: document.getElementById('qmf_fee_notes').value.trim() });
           if (paid > 0) await db.payments.add({ case_id: mainFile.id, amount: paid, date: now.slice(0, 10), note: 'دفعة مقدمة' });
         }
       }
@@ -577,7 +605,7 @@
     if (!file) { const { Swal } = G(); if (Swal) Swal.fire('خطأ', 'الملف الرئيسي غير موجود', 'error'); return; }
 
     let stages = [];
-    try { stages = await db.cases.filter(c => c.legal_file_id === file.id).toArray(); } catch (e) { stages = []; }
+    stages = await loadStagesForFile(file.id);
     stages.sort((a, b) => {
       const oa = STAGE_KINDS[a.stage_kind] ? STAGE_KINDS[a.stage_kind].order : 0;
       const ob = STAGE_KINDS[b.stage_kind] ? STAGE_KINDS[b.stage_kind].order : 0;
@@ -598,6 +626,9 @@
       const isCurrent = i === 0;
       const sessions = await db.sessions.where('case_id').equals(s.id).toArray().catch(() => []);
       const fee = await db.fees.get(s.id).catch(() => null) || { total: 0, paid: 0, remaining: 0 };
+      const stagePayments = await db.payments.where('case_id').equals(s.id).toArray().catch(() => []);
+      fee.paid = stagePayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+      fee.remaining = Math.max(0, Number(fee.total || 0) - fee.paid);
       stagesHtml += `
         <div class="qmf-stage ${isCurrent ? 'current' : ''}">
           <div class="qmf-stage-head">
@@ -618,7 +649,7 @@
           ${s.judgment_summary ? `<div class="qmf-judgment"><b>منطوق الحكم:</b> ${esc(s.judgment_summary)}${s.judgment_date ? ' — ' + esc(s.judgment_date) : ''}</div>` : ''}
           <div class="qmf-actions">
             <button class="btn btn-sm btn-outline-info" onclick="QMF.openStage('${s.id}')"><i class="bi bi-box-arrow-up-left"></i> فتح المرحلة</button>
-            <button class="btn btn-sm btn-success" onclick="QMF.openStageFees('${s.id}')"><i class="bi bi-cash-coin"></i> أتعاب المرحلة</button>
+            <button class="btn btn-sm btn-success" onclick="QMF.openStageFees('${s.id}','${file.id}')"><i class="bi bi-cash-coin"></i> أتعاب المرحلة</button>
             <button class="btn btn-sm btn-outline-warning" onclick="QMF.printFees('${file.id}','${s.id}')"><i class="bi bi-printer"></i> طباعة أتعاب المرحلة</button>
             <button class="btn btn-sm btn-outline-primary" onclick="QMF.printData('${file.id}','${s.id}')"><i class="bi bi-file-earmark-text"></i> طباعة بيانات المرحلة</button>
           </div>
@@ -643,6 +674,7 @@
         </div>
         <div class="qmf-actions">
           ${cat === 'judicial' ? `<button class="btn btn-sm gold-btn" onclick="QMF.openAddStage('${file.id}')"><i class="bi bi-plus-lg"></i> إضافة مرحلة</button>` : `<button class="btn btn-sm gold-btn" onclick="QMF.convertToJudicial('${file.id}')"><i class="bi bi-arrow-repeat"></i> تحويل إلى ملف قضائي</button>`}
+          <button class="btn btn-sm btn-success" onclick="QMF.openFileFees('${file.id}')"><i class="bi bi-cash-stack"></i> إدارة أتعاب الملف</button>
           <button class="btn btn-sm btn-outline-success" onclick="QMF.printFees('${file.id}')"><i class="bi bi-printer"></i> طباعة أتعاب الملف كله</button>
           <button class="btn btn-sm btn-outline-primary" onclick="QMF.printData('${file.id}')"><i class="bi bi-file-earmark-text"></i> طباعة بيانات الملف كله</button>
         </div>
@@ -674,11 +706,12 @@
   async function aggregateFees(file, stages) {
     const { db } = G();
     let total = 0, paid = 0;
-    const ids = stages.map(s => s.id);
-    if (!ids.length) ids.push(file.id);
+    const ids = [file.id, ...stages.map(s => s.id)].filter((id, index, all) => id && all.indexOf(id) === index);
     for (const id of ids) {
       const fee = await db.fees.get(id).catch(() => null);
-      if (fee) { total += Number(fee.total || 0); paid += Number(fee.paid || 0); }
+      if (fee) total += Number(fee.total || 0);
+      const payments = await db.payments.where('case_id').equals(id).toArray().catch(() => []);
+      paid += payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
     }
     return { total, paid, remaining: total - paid };
   }
@@ -692,8 +725,7 @@
     _stageParentFile = await db.legalFiles.get(legalFileId);
     if (!_stageParentFile) return;
     // أحدث مرحلة للتوريث
-    let stages = [];
-    try { stages = await db.cases.filter(c => c.legal_file_id === legalFileId).toArray(); } catch (e) {}
+    let stages = await loadStagesForFile(legalFileId);
     stages.sort((a, b) => (STAGE_KINDS[b.stage_kind] ? STAGE_KINDS[b.stage_kind].order : 0) - (STAGE_KINDS[a.stage_kind] ? STAGE_KINDS[a.stage_kind].order : 0));
     const prev = stages[0] || null;
     _stageParentFile._prevStage = prev;
@@ -796,7 +828,7 @@
       const total = parseFloat(document.getElementById('qmf_ns_fee_total').value) || 0;
       const paid = parseFloat(document.getElementById('qmf_ns_fee_paid').value) || 0;
       if (total > 0 || paid > 0) {
-        await db.fees.put({ case_id: stage.id, total, paid, remaining: total - paid, notes: document.getElementById('qmf_ns_fee_notes').value.trim() });
+        await db.fees.put({ case_id: stage.id, legal_file_id: _stageParentFile.id, stage_id: stage.id, scope: 'stage', total, paid, remaining: Math.max(0, total - paid), notes: document.getElementById('qmf_ns_fee_notes').value.trim() });
         if (paid > 0) await db.payments.add({ case_id: stage.id, amount: paid, date: now.slice(0, 10), note: 'دفعة مقدمة' });
       }
 
@@ -860,10 +892,15 @@
     if (typeof hideModal === 'function') hideModal('qmfDetailsModal');
     setTimeout(() => { if (typeof window.openCaseDetails === 'function') window.openCaseDetails(stageId); }, 300);
   }
-  function openStageFees(stageId) {
+  function openStageFees(stageId, legalFileId) {
     const { hideModal } = G();
     if (typeof hideModal === 'function') hideModal('qmfDetailsModal');
-    setTimeout(() => { if (typeof window.openFeesModal === 'function') window.openFeesModal(stageId); }, 300);
+    setTimeout(() => { if (typeof window.openFeesModal === 'function') window.openFeesModal(stageId, legalFileId, 'stage'); }, 300);
+  }
+  function openFileFees(legalFileId) {
+    const { hideModal } = G();
+    if (typeof hideModal === 'function') hideModal('qmfDetailsModal');
+    setTimeout(() => { if (typeof window.openFeesModal === 'function') window.openFeesModal(legalFileId, legalFileId, 'file'); }, 300);
   }
 
   /* ============================================================
@@ -972,8 +1009,7 @@
     }
 
     // الملف كله
-    let stages = [];
-    try { stages = await db.cases.filter(c => c.legal_file_id === legalFileId).toArray(); } catch (e) {}
+    let stages = await loadStagesForFile(legalFileId);
     stages.sort((a, b) => (STAGE_KINDS[a.stage_kind] ? STAGE_KINDS[a.stage_kind].order : 0) - (STAGE_KINDS[b.stage_kind] ? STAGE_KINDS[b.stage_kind].order : 0));
 
     let body = `<div class="stage-block">
@@ -1029,6 +1065,7 @@
       convertToJudicial,
       openStage,
       openStageFees,
+      openFileFees,
       printFees,
       printData,
       onTypeChange,
