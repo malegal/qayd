@@ -208,14 +208,14 @@ ipcMain.handle('open-notes', async (event, folderName) => {
 // الأنواع القديمة تبقى مدعومة للتوافق، والملفات الجديدة تستخدم PI/DR/DC/GR/PR أو RE/CT/CO.
 ipcMain.handle('create-professional-file-folder', async (event, fileCode, clientName, fileType, fileData) => {
     try {
-        if (typeof fileCode !== 'string' || !/^(RE|CT|CO|PI|DR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(fileCode.trim())) {
+        if (typeof fileCode !== 'string' || !/^(?:MJ|J|M)-[0-9]{2}-[0-9]{4}-[A-Z0-9]{6}$/.test(fileCode.trim())) {
             return { success: false, error: 'لا يمكن إنشاء مجلد خدمة مهنية بدون كود صالح' };
         }
         if (!fileData || fileData.file_code !== fileCode.trim()) {
             return { success: false, error: 'بيانات المجلد لا تطابق كود الملف' };
         }
         const folders = { prosecution_investigation: 'تحقيقات النيابة', detention_renewal: 'تجديد الحبس', dispute_committee: 'لجان فض المنازعات', grievance: 'التظلمات', legal_procedure: 'الإجراءات القانونية', real_estate: 'تسجيل العقارات', contract_writing: 'العقود', company_formation: 'تأسيس الشركات', administrative: 'خدمات إدارية' };
-        const category = folders[fileType] || folders.administrative;
+        const category = fileData?.metadata?.standalone ? 'إجراءات مستقلة' : (folders[fileType] || folders.administrative);
         const docsPath = app.getPath('documents');
         const baseDir = path.join(docsPath, 'مكتب المحامي', 'الخدمات', category);
         const folderName = `${fileCode} - ${clientName}`.replace(/[<>:"/\\|?*]/g, '_');
