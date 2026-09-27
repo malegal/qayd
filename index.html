@@ -313,16 +313,39 @@
                 <div class="page-shell">
                     <div class="page-heading"><div><h3>لوحة تحكم مكتب جاد الرب</h3><p>رؤية يومية للملفات والجلسات والمهام والمزامنة والطلبات الواردة من الفريق.</p></div><div class="d-flex align-items-center gap-2"><button class="btn btn-outline-warning notif-btn" onclick="openNotificationsCenter()" title="مركز الإشعارات"><i class="bi bi-bell"></i><span id="notifCount" class="notif-count" style="display:none;">0</span></button><span id="dashboardSyncState" class="badge bg-secondary">جاري الفحص</span></div></div>
                     <div class="dashboard-grid">
-                        <div class="dashboard-card"><i class="bi bi-briefcase dc-icon"></i><small>قضايا نشطة</small><strong id="dashActiveCases">0</strong></div>
-                        <div class="dashboard-card"><i class="bi bi-folder2-open dc-icon"></i><small>الملفات الرئيسية</small><strong id="dashLegalFiles">0</strong></div>
-                        <div class="dashboard-card alert"><i class="bi bi-exclamation-triangle dc-icon"></i><small>ملفات تحتاج إجراء</small><strong id="dashFilesNeedingAction">0</strong></div>
-                        <div class="dashboard-card"><i class="bi bi-calendar-check dc-icon"></i><small>جلسات اليوم</small><strong id="dashTodaySessions">0</strong></div>
-                        <div class="dashboard-card"><i class="bi bi-calendar-week dc-icon"></i><small>جلسات الأسبوع</small><strong id="dashWeekSessions">0</strong></div>
-                        <div class="dashboard-card"><i class="bi bi-hourglass-split dc-icon"></i><small>جلسات مؤجلة</small><strong id="dashPostponed">0</strong></div>
-                        <div class="dashboard-card alert"><i class="bi bi-list-check dc-icon"></i><small>مهام متأخرة</small><strong id="dashLateTasks">0</strong></div>
-                        <div class="dashboard-card"><i class="bi bi-calendar-x dc-icon"></i><small>قضايا دون جلسة قادمة</small><strong id="dashNoNextSession">0</strong></div>
-                        <div class="dashboard-card"><i class="bi bi-cash-coin dc-icon"></i><small>المتبقي من الأتعاب</small><strong id="dashRemainingFees">0</strong></div>
-                        <div class="dashboard-card"><i class="bi bi-arrow-repeat dc-icon"></i><small>عمليات معلقة</small><strong id="dashPendingOps">0</strong></div>
+                        <div class="dashboard-card dash-kpi-click" onclick="showTab('cases')" title="عرض الملفات"><i class="bi bi-briefcase dc-icon"></i><small>قضايا نشطة</small><strong id="dashActiveCases">0</strong></div>
+                        <div class="dashboard-card dash-kpi-click" onclick="showTab('cases')" title="عرض الملفات الرئيسية"><i class="bi bi-folder2-open dc-icon"></i><small>الملفات الرئيسية</small><strong id="dashLegalFiles">0</strong></div>
+                        <div class="dashboard-card alert dash-kpi-click" onclick="dashOpenNeedingAction()" title="عرض الملفات التي تحتاج إجراء"><i class="bi bi-exclamation-triangle dc-icon"></i><small>ملفات تحتاج إجراء</small><strong id="dashFilesNeedingAction">0</strong></div>
+                        <div class="dashboard-card dash-kpi-click" onclick="showTab('agendaTab')" title="عرض الأجندة"><i class="bi bi-calendar-check dc-icon"></i><small>جلسات اليوم</small><strong id="dashTodaySessions">0</strong></div>
+                        <div class="dashboard-card dash-kpi-click" onclick="showTab('agendaTab')" title="عرض الأجندة"><i class="bi bi-calendar-week dc-icon"></i><small>جلسات الأسبوع</small><strong id="dashWeekSessions">0</strong></div>
+                        <div class="dashboard-card dash-kpi-click" onclick="showTab('agendaTab')" title="عرض الأجندة"><i class="bi bi-hourglass-split dc-icon"></i><small>جلسات مؤجلة</small><strong id="dashPostponed">0</strong></div>
+                        <div class="dashboard-card alert dash-kpi-click" onclick="showTab('agendaTab')" title="عرض المهام"><i class="bi bi-list-check dc-icon"></i><small>مهام متأخرة</small><strong id="dashLateTasks">0</strong></div>
+                        <div class="dashboard-card dash-kpi-click" onclick="dashOpenNoNextSession()" title="عرض القضايا دون جلسة قادمة"><i class="bi bi-calendar-x dc-icon"></i><small>قضايا دون جلسة قادمة</small><strong id="dashNoNextSession">0</strong></div>
+                        <div class="dashboard-card dash-kpi-click" onclick="loadFinancePage()" title="عرض الدفتر المالي"><i class="bi bi-cash-coin dc-icon"></i><small>المتبقي من الأتعاب</small><strong id="dashRemainingFees">0</strong></div>
+                        <div class="dashboard-card dash-kpi-click" onclick="openNotificationsCenter()" title="عرض مركز الإشعارات"><i class="bi bi-arrow-repeat dc-icon"></i><small>عمليات معلقة</small><strong id="dashPendingOps">0</strong></div>
+                    </div>
+                    <div class="owner-portal-card fm-today-panel mt-3" id="dashboardTodayPanel">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <h5 class="mb-0"><i class="bi bi-sunrise"></i> أعمال اليوم والمتأخرات</h5>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-danger" id="dashTodayOverdueCount">0 متأخر</span>
+                                <button class="btn btn-sm btn-outline-primary" onclick="refreshDashboardToday()"><i class="bi bi-arrow-repeat"></i> تحديث</button>
+                            </div>
+                        </div>
+                        <div class="dash-today-grid mt-2">
+                            <div class="dash-today-col">
+                                <div class="dash-today-title"><i class="bi bi-calendar-check"></i> جلسات اليوم</div>
+                                <div id="dashTodaySessionsList" class="portal-list dash-today-list"></div>
+                            </div>
+                            <div class="dash-today-col">
+                                <div class="dash-today-title"><i class="bi bi-list-check"></i> مهام متأخرة</div>
+                                <div id="dashTodayTasksList" class="portal-list dash-today-list"></div>
+                            </div>
+                            <div class="dash-today-col">
+                                <div class="dash-today-title"><i class="bi bi-hourglass-split"></i> متابعات متأخرة</div>
+                                <div id="dashTodayFollowupsList" class="portal-list dash-today-list"></div>
+                            </div>
+                        </div>
                     </div>
                     <div class="portal-columns">
                         <div class="owner-portal-card"><div class="d-flex justify-content-between align-items-center"><h5 class="mb-0">آخر نشاط في المكتب</h5><button class="btn btn-sm btn-outline-primary" onclick="refreshOwnerPortal()">تحديث</button></div><div id="dashboardRecentActivity" class="portal-list mt-2"></div></div>
@@ -357,7 +380,7 @@
             <div class="tab-pane fade" id="financeTab" role="tabpanel">
                 <div class="page-heading"><div><h3>الدفتر المالي الموحد</h3><p>حساب مستقل للمكتب، ولكل قضية أو ملف، مع عرض المتحصلات والمصروفات وصافي الحساب.</p></div><div class="d-flex gap-2"><button class="gold-btn" onclick="openOfficeExpenseModal()"><i class="bi bi-wallet2"></i> تسجيل مصروف مكتب</button><button class="btn btn-outline-primary" onclick="showTab('cases'); openNewSessionShortcut()"><i class="bi bi-calendar-plus"></i> جلسة جديدة</button></div></div>
                 <div class="finance-summary-grid mb-4"><div class="finance-summary-card"><span>إجمالي العمليات</span><strong id="financePageFees">0.00</strong></div><div class="finance-summary-card success"><span>إجمالي المتحصلات</span><strong id="financePageCollected">0.00</strong></div><div class="finance-summary-card danger"><span>إجمالي المصروفات</span><strong id="financePageExpenses">0.00</strong></div><div class="finance-summary-card primary"><span>صافي الحساب</span><strong id="financePageProfit">0.00</strong></div></div>
-                <div class="finance-toolbar"><input id="financeSearchInput" class="form-control" placeholder="بحث بالاسم أو رقم القضية أو كود الملف..." oninput="filterFinancePage()"><select id="financeTypeFilter" class="form-select" onchange="filterFinancePage()"><option value="">كل الملفات</option><option value="judicial">قضايا قضائية</option><option value="professional">ملفات إجرائية وخدمية</option><option value="office">حساب المكتب</option></select><button class="navy-btn" onclick="loadFinancePage()"><i class="bi bi-arrow-repeat"></i> تحديث</button></div>
+                <div class="finance-toolbar"><input id="financeSearchInput" class="form-control" placeholder="بحث بالاسم أو رقم القضية أو كود الملف..." oninput="filterFinancePage()"><select id="financeTypeFilter" class="form-select" onchange="filterFinancePage()"><option value="">كل الملفات</option><option value="judicial">ملفات قضائية</option><option value="professional">ملفات إجرائية وخدمية</option><option value="office">حساب المكتب</option></select><button class="navy-btn" onclick="loadFinancePage()"><i class="bi bi-arrow-repeat"></i> تحديث</button></div>
                 <div class="table-responsive"><table class="table finance-table align-middle"><thead><tr><th>العميل</th><th>الملف</th><th>المحكمة/الخدمة</th><th>الأتعاب</th><th>المتحصل</th><th>المصروفات</th><th>صافي الربح</th><th>إجراء</th></tr></thead><tbody id="financeTableBody"></tbody></table></div>
             </div>
 
@@ -487,6 +510,19 @@
             <div class="tab-pane fade" id="ownerPortalTab" role="tabpanel">
                 <div class="page-shell"><div class="page-heading"><div><h3>مساحة المالك</h3><p>إدارة أعضاء المكتب، الطلبات الواردة، التعارضات، المهام والإشعارات من لوحة واحدة.</p></div><button class="gold-btn" onclick="refreshOwnerPortal()"><i class="bi bi-arrow-repeat"></i> تحديث البوابة</button></div>
                     <div class="owner-portal-grid"><div class="owner-portal-card"><small>طلبات الهاتف</small><strong id="portalApprovalCount">0</strong></div><div class="owner-portal-card"><small>تعارضات المزامنة</small><strong id="portalConflictCount">0</strong></div><div class="owner-portal-card"><small>مهام مفتوحة</small><strong id="portalOpenTasks">0</strong></div><div class="owner-portal-card"><small>إشعارات محلية</small><strong id="portalNotifications">0</strong></div></div>
+                    <div class="owner-portal-card fm-health-panel mt-3">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <h5 class="mb-0"><i class="bi bi-activity"></i> صحة المكتب</h5>
+                            <span class="badge bg-secondary" id="portalHealthBadge">—</span>
+                        </div>
+                        <div class="portal-health-grid mt-2">
+                            <div class="portal-health-item"><span class="ph-label">ملفات تحتاج إجراء</span><strong id="portalHealthNeedingAction">0</strong></div>
+                            <div class="portal-health-item"><span class="ph-label">متابعات متأخرة</span><strong id="portalHealthOverdue">0</strong></div>
+                            <div class="portal-health-item"><span class="ph-label">جلسات الأسبوع</span><strong id="portalHealthWeek">0</strong></div>
+                            <div class="portal-health-item"><span class="ph-label">عمليات معلقة</span><strong id="portalHealthPending">0</strong></div>
+                            <div class="portal-health-item"><span class="ph-label">أتعاب متبقية</span><strong id="portalHealthFees">0</strong></div>
+                        </div>
+                    </div>
                     <div class="portal-columns"><div class="owner-portal-card"><div class="d-flex justify-content-between align-items-center"><h5>إدارة أعضاء المكتب</h5><button class="btn btn-sm btn-outline-warning" onclick="showTeamManagement()"><i class="bi bi-person-plus"></i> دعوة أو عزل عضو</button></div><div id="portalMembersList" class="portal-list"></div></div><div class="owner-portal-card"><div class="d-flex justify-content-between align-items-center"><h5>طلبات الهاتف والتعارضات</h5><button class="btn btn-sm btn-outline-info" onclick="openOwnerReviewCenter()">فتح المركز</button></div><div id="portalApprovalList" class="portal-list"></div></div></div>
                     <div class="portal-columns"><div class="owner-portal-card"><h5>المهام المفتوحة والمتأخرة</h5><div id="portalTasksList" class="portal-list"></div></div><div class="owner-portal-card"><h5>الإشعارات والنشاط الأخير</h5><div id="portalNotificationsList" class="portal-list"></div></div></div>
                 </div>
@@ -614,43 +650,78 @@
 
 <!-- مودال إضافة قضية جديدة -->
 <div class="modal fade" id="addCaseModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-xl">
         <div class="modal-content">
-            <div class="modal-header"><h5 class="modal-title gold-text">قضية جديدة</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-header"><h5 class="modal-title gold-text"><i class="bi bi-folder-plus"></i> ملف قضائي جديد</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body">
                 <form id="caseFormModal">
-                    <div class="case-form-section mb-3"><div class="case-form-section-title">بيانات الملف والحالة</div>
-                    <div class="row g-3">
-                        <div class="col-md-4"><label>اسم العميل</label><input id="client_name" class="form-control" required></div>
-                        <div class="col-md-4"><label>هاتف العميل</label><input id="client_phone" class="form-control" required></div><div class="col-md-4"><label>الرقم القومي للعميل</label><input id="client_national_id" class="form-control" inputmode="numeric"></div>
-                        <div class="col-md-8"><label>عنوان العميل</label><input id="client_address" class="form-control" placeholder="العنوان بالتفصيل"></div>
-                        <div class="col-md-4"><label>إيميل العميل</label><input type="email" id="client_email" class="form-control"></div>
-                        <div class="col-md-4"><label>صفة العميل</label><select id="client_role" class="form-select" required><option>مدعي</option><option>مدعى عليه</option><option>مستأنف</option><option>مستأنف ضده</option><option>طاعن</option><option>مطعون ضده</option><option>مجني عليه</option><option>متهم</option></select></div>
-                        <div class="col-md-4"><label>رقم التوكيل</label><input id="client_power_number" class="form-control"></div><div class="col-md-4"><label>سنة التوكيل</label><input id="client_power_year" class="form-control"></div><div class="col-md-4"><label>مكتب التوثيق</label><input id="client_notary_office" class="form-control"></div>
-                        <div class="col-12"><button type="button" class="btn btn-outline-info btn-sm" onclick="addCasePartyRow('client')"><i class="bi bi-person-plus"></i> إضافة عميل آخر</button><div id="additionalClients" class="row g-2 mt-1"></div></div>
-                        <div class="col-md-4"><label>الخصم</label><input id="opponent_name" class="form-control"></div>
-                        <div class="col-md-4"><label>صفة الخصم</label><input id="opponent_role" class="form-control" placeholder="مثال: مدعى عليه"></div><div class="col-md-4"><label>هاتف الخصم</label><input id="opponent_phone" class="form-control"></div><div class="col-md-4"><label>الرقم القومي للخصم</label><input id="opponent_national_id" class="form-control" inputmode="numeric"></div><div class="col-md-4"><label>إيميل الخصم</label><input type="email" id="opponent_email" class="form-control"></div>
-                        <div class="col-md-8"><label>عنوان الخصم</label><input id="opponent_address" class="form-control"></div>
-                        <div class="col-12"><button type="button" class="btn btn-outline-danger btn-sm" onclick="addCasePartyRow('opponent')"><i class="bi bi-person-plus"></i> إضافة خصم آخر</button><div id="additionalOpponents" class="row g-2 mt-1"></div></div>
-                        <div class="col-md-2"><label>رقم القضية</label><input id="case_number" class="form-control" required></div>
-                        <div class="col-md-2"><label>السنة</label><input id="case_year" class="form-control" required></div>
-                        <div class="col-md-5"><label>المحكمة</label><select id="court_name" class="form-select" required><option value="">اختر المحكمة...</option><option>محكمة الأسرة</option><option>المحكمة الجزئية</option><option>المحكمة الابتدائية</option><option>محكمة الاستئناف</option><option>المحكمة العمالية</option><option>المحكمة الاقتصادية</option><option>المحكمة الادارية</option><option>محكمة القضاء الاداري</option><option>المحكمة الادارية العليا</option><option>محكمة النقض</option></select></div>
-                        <div class="col-md-3"><label>الدائرة</label><input id="circuit" class="form-control"></div>
-                        <div class="col-md-4"><label>نوع القضية</label><select id="case_type" class="form-select" required><option value="">اختر النوع...</option><option value="مدنية">مدنية</option><option value="جنائية">جنائية</option><option value="أحوال شخصية">أحوال شخصية</option><option value="إدارية">إدارية</option><option value="تجارية">تجارية</option><option value="عمالية">عمالية</option><option value="تنفيذ">تنفيذ</option><option value="دستورية">دستورية</option><option value="ضريبية">ضريبية</option><option value="أخرى">أخرى</option></select></div>
-                        <div class="col-md-4"><label>مرحلة التقاضي</label><select id="case_stage" class="form-select"><option value="first_instance">أول درجة</option><option value="appeal">استئناف</option><option value="retrial">التماس إعادة نظر</option><option value="cassation">طعن</option><option value="enforcement">تنفيذ</option></select></div><div class="col-md-4"><label>درجة الأهمية</label><select id="case_importance" class="form-select"><option value="normal">عادية</option><option value="high">مهمة</option><option value="urgent">عاجلة</option></select></div>
-                        <div class="col-md-6"><label>تنبيهات ومواعيد خاصة</label><input id="case_alert_notes" class="form-control" placeholder="تنبيه قبل جلسة أو موعد مهم"></div><div class="col-md-6"><label>مدينة المحكمة</label><input id="case_city" class="form-control"></div>
-                        <div class="col-md-12"><label>موضوع القضية</label><textarea id="case_subject" class="form-control" rows="2"></textarea></div><div class="col-md-4"><label>حالة القضية</label><select id="case_status" class="form-select"><option value="جديدة">جديدة</option><option value="قيد الرفع">قيد الرفع</option><option value="قيد النظر">قيد النظر</option><option value="مؤجلة">مؤجلة</option><option value="للحكم">للحكم</option><option value="تم الحكم">تم الحكم</option><option value="منتهية">منتهية</option><option value="مؤرشفة">مؤرشفة</option></select></div>
-                    </div>
-                        <div class="case-form-section">
-                            <div class="case-form-section-title">الأتعاب والمصروفات</div>
-                            <div id="feesSectionModal" style="display:block; margin-top:10px;"><div class="row"><div class="col-6"><label>إجمالي الأتعاب</label><input type="number" id="fee_total" class="form-control"></div><div class="col-6"><label>مدفوع مقدماً</label><input type="number" id="fee_paid" class="form-control"></div><div class="col-12"><label>ملاحظات الأتعاب</label><textarea id="fee_notes" class="form-control"></textarea></div><div class="col-md-6"><label>مصروفات ابتدائية</label><input type="number" id="case_expense_amount" class="form-control" min="0"></div><div class="col-md-6"><label>بند المصروف</label><input id="case_expense_category" class="form-control" placeholder="رسوم، انتقالات..."></div></div></div>
+                    <!-- القسم 1: بيانات العملاء -->
+                    <div class="case-form-section mb-3">
+                        <div class="case-form-section-title"><i class="bi bi-people-fill"></i> 1) بيانات العملاء</div>
+                        <div class="row g-3">
+                            <div class="col-md-4"><label>اسم العميل</label><input id="client_name" class="form-control" required></div>
+                            <div class="col-md-4"><label>الرقم القومي</label><input id="client_national_id" class="form-control" inputmode="numeric"></div>
+                            <div class="col-md-4"><label>الهاتف</label><input id="client_phone" class="form-control" required></div>
+                            <div class="col-md-8"><label>العنوان</label><input id="client_address" class="form-control" placeholder="العنوان بالتفصيل"></div>
+                            <div class="col-md-4"><label>البريد الإلكتروني</label><input type="email" id="client_email" class="form-control"></div>
+                            <div class="col-md-4"><label>صفة العميل</label><select id="client_role" class="form-select" required><option>مدعي</option><option>مدعى عليه</option><option>مستأنف</option><option>مستأنف ضده</option><option>طاعن</option><option>مطعون ضده</option><option>مجني عليه</option><option>متهم</option></select></div>
+                            <div class="col-md-4"><label>رقم التوكيل</label><input id="client_power_number" class="form-control"></div>
+                            <div class="col-md-2"><label>سنة التوكيل</label><input id="client_power_year" class="form-control"></div>
+                            <div class="col-md-2"><label>مكتب التوثيق</label><input id="client_notary_office" class="form-control"></div>
+                            <div class="col-12"><button type="button" class="btn btn-outline-info btn-sm" onclick="addCasePartyRow('client')"><i class="bi bi-person-plus"></i> إضافة عميل آخر</button><div id="additionalClients" class="row g-2 mt-1"></div></div>
                         </div>
+                    </div>
+                    <!-- القسم 2: بيانات الخصوم -->
+                    <div class="case-form-section mb-3">
+                        <div class="case-form-section-title"><i class="bi bi-person-x"></i> 2) بيانات الخصوم</div>
+                        <div class="row g-3">
+                            <div class="col-md-4"><label>اسم الخصم</label><input id="opponent_name" class="form-control"></div>
+                            <div class="col-md-4"><label>الرقم القومي</label><input id="opponent_national_id" class="form-control" inputmode="numeric"></div>
+                            <div class="col-md-4"><label>الهاتف</label><input id="opponent_phone" class="form-control"></div>
+                            <div class="col-md-8"><label>العنوان</label><input id="opponent_address" class="form-control"></div>
+                            <div class="col-md-4"><label>البريد الإلكتروني</label><input type="email" id="opponent_email" class="form-control"></div>
+                            <div class="col-md-4"><label>صفة الخصم</label><input id="opponent_role" class="form-control" placeholder="مثال: مدعى عليه"></div>
+                            <div class="col-12"><button type="button" class="btn btn-outline-danger btn-sm" onclick="addCasePartyRow('opponent')"><i class="bi bi-person-plus"></i> إضافة خصم آخر</button><div id="additionalOpponents" class="row g-2 mt-1"></div></div>
+                        </div>
+                    </div>
+                    <!-- القسم 3: بيانات القضية -->
+                    <div class="case-form-section mb-3">
+                        <div class="case-form-section-title"><i class="bi bi-briefcase"></i> 3) بيانات القضية</div>
+                        <div class="row g-3">
+                            <div class="col-md-4"><label>نوع القضية</label><select id="case_type" class="form-select" required><option value="">اختر النوع...</option><option value="مدنية">مدنية</option><option value="جنائية">جنائية</option><option value="أحوال شخصية">أحوال شخصية</option><option value="إدارية">إدارية</option><option value="تجارية">تجارية</option><option value="عمالية">عمالية</option><option value="تنفيذ">تنفيذ</option><option value="دستورية">دستورية</option><option value="ضريبية">ضريبية</option><option value="أخرى">أخرى</option></select></div>
+                            <div class="col-md-4"><label>درجة الأهمية</label><select id="case_importance" class="form-select"><option value="normal">عادية</option><option value="high">مهمة</option><option value="urgent">عاجلة</option></select></div>
+                            <div class="col-md-4"><label>تنبيهات ومواعيد خاصة</label><input id="case_alert_notes" class="form-control" placeholder="تنبيه قبل جلسة أو موعد مهم"></div>
+                            <div class="col-12"><label>موضوع القضية</label><textarea id="case_subject" class="form-control" rows="2"></textarea></div>
+                        </div>
+                    </div>
+                    <!-- القسم 4: المرحلة -->
+                    <div class="case-form-section mb-3">
+                        <div class="case-form-section-title"><i class="bi bi-diagram-3"></i> 4) المرحلة</div>
+                        <div class="row g-3">
+                            <div class="col-md-4"><label>المرحلة</label><select id="case_stage" class="form-select"><option value="first_instance">أول درجة</option><option value="appeal">استئناف</option><option value="retrial">التماس إعادة نظر</option><option value="cassation">طعن بالنقض</option><option value="enforcement">تنفيذ</option><option value="opposition">معارضة</option><option value="execution_objection">إشكال تنفيذ</option></select></div>
+                            <div class="col-md-2"><label>رقم القضية</label><input id="case_number" class="form-control" required></div>
+                            <div class="col-md-2"><label>السنة</label><input id="case_year" class="form-control" required></div>
+                            <div class="col-md-4"><label>المحكمة</label><select id="court_name" class="form-select" required><option value="">اختر المحكمة...</option><option>محكمة الأسرة</option><option>المحكمة الجزئية</option><option>المحكمة الابتدائية</option><option>محكمة الاستئناف</option><option>المحكمة العمالية</option><option>المحكمة الاقتصادية</option><option>المحكمة الادارية</option><option>محكمة القضاء الاداري</option><option>المحكمة الادارية العليا</option><option>محكمة النقض</option></select></div>
+                            <div class="col-md-3"><label>الدائرة</label><input id="circuit" class="form-control"></div>
+                            <div class="col-md-3"><label>المدينة</label><input id="case_city" class="form-control"></div>
+                            <div class="col-md-3"><label>تاريخ أول جلسة</label><input type="date" id="case_first_session_date" class="form-control"></div>
+                            <div class="col-md-3"><label>حالة الدعوى</label><select id="case_status" class="form-select"><option value="جديدة">جديدة</option><option value="قيد الرفع">قيد الرفع</option><option value="قيد النظر">قيد النظر</option><option value="مؤجلة">مؤجلة</option><option value="محجوزة للحكم">محجوزة للحكم</option><option value="للحكم">للحكم</option><option value="تم الحكم">تم الحكم</option><option value="منتهية">منتهية</option><option value="مؤرشفة">مؤرشفة</option></select></div>
+                            <div class="col-12"><button type="button" class="btn btn-outline-primary btn-sm" onclick="addCaseStageRow()"><i class="bi bi-plus-circle"></i> إضافة مرحلة</button><div id="additionalStages" class="row g-2 mt-1"></div></div>
+                        </div>
+                    </div>
+                    <!-- الأتعاب والمصروفات -->
+                    <div class="case-form-section">
+                        <div class="case-form-section-title"><i class="bi bi-cash-stack"></i> الأتعاب والمصروفات</div>
+                        <div id="feesSectionModal" style="display:block; margin-top:10px;"><div class="row g-2"><div class="col-6"><label>إجمالي الأتعاب</label><input type="number" id="fee_total" class="form-control"></div><div class="col-6"><label>مدفوع مقدماً</label><input type="number" id="fee_paid" class="form-control"></div><div class="col-12"><label>ملاحظات الأتعاب</label><textarea id="fee_notes" class="form-control"></textarea></div><div class="col-md-6"><label>مصروفات ابتدائية</label><input type="number" id="case_expense_amount" class="form-control" min="0"></div><div class="col-md-6"><label>بند المصروف</label><input id="case_expense_category" class="form-control" placeholder="رسوم، انتقالات..."></div></div></div>
                     </div>
                 </form>
             </div>
-            <div class="modal-footer"><button class="gold-btn" onclick="saveNewCase()">حفظ القضية</button></div>
+            <div class="modal-footer"><button class="gold-btn" onclick="saveNewCase()"><i class="bi bi-save"></i> حفظ الملف</button></div>
         </div>
     </div>
+</div>
+
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
 </div>
 
 <!-- مودال إعداد المكتب -->
@@ -859,7 +930,7 @@
 <!-- سجل إجراء مستقل للملفات الإجرائية والخدمية؛ يشبه الجلسة في الملف القضائي دون خلط النوعين. -->
 <div class="modal fade" id="professionalActionModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title gold-text">إضافة إجراء أو موعد</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><label class="form-label">تاريخ الإجراء</label><input type="date" id="professionalActionDate" class="form-control mb-2"><label class="form-label">ما تم</label><textarea id="professionalActionDone" class="form-control mb-2" rows="2" placeholder="وصف الإجراء أو الموعد الذي تم"></textarea><label class="form-label">الإجراء القادم</label><textarea id="professionalActionNext" class="form-control mb-2" rows="2" placeholder="ما سوف يتم بعد ذلك"></textarea><label class="form-label">موعد الإجراء القادم</label><input type="date" id="professionalActionNextDate" class="form-control"></div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button><button class="gold-btn" onclick="saveProfessionalAction()">حفظ الإجراء</button></div></div></div></div>
 
-<!-- واجهة الملفات المهنية: منفصلة عن واجهة القضايا القضائية مع تجربة استخدام موحدة. -->
+<!-- واجهة الملفات المهنية: منفصلة عن واجهة الملفات القضائية مع تجربة استخدام موحدة. -->
 <div class="modal fade" id="professionalFileModal" tabindex="-1">
   <div class="modal-dialog modal-lg"><div class="modal-content">
     <div class="modal-header"><h5 class="modal-title gold-text" id="professionalFileModalTitle"><i class="bi bi-briefcase"></i> إنشاء ملف خدمة مهنية</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
@@ -1001,6 +1072,32 @@ table.fm-table tbody tr.fm-row-overdue td:first-child { box-shadow: inset 4px 0 
 .fm-palette-hint { padding: .6rem 1rem; font-size: .75rem; color: #8fa3ba; border-top: 1px solid rgba(255,255,255,.12); }
 .fm-kbd { background: #1c2b45; border: 1px solid #2f4667; border-radius: 5px; padding: 0 .35rem; font-size: .72rem; }
 @media (max-width: 640px) { .fm-toolbar-actions { width: 100%; } .fm-bulk-bar { flex-direction: column; align-items: stretch; } }
+
+/* لوحة أعمال اليوم والمتأخرات (لوحة التحكم) */
+.dash-kpi-click { cursor: pointer; transition: transform .12s ease, box-shadow .12s ease; }
+.dash-kpi-click:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(18,51,91,.14); }
+.fm-today-panel { border-top: 3px solid var(--gold-solid); }
+.dash-today-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8rem; }
+.dash-today-col { background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; padding: .7rem .8rem; }
+.dash-today-title { font-weight: 800; color: var(--navy); font-size: .9rem; margin-bottom: .4rem; display: flex; align-items: center; gap: .4rem; }
+.dash-today-list { max-height: 220px; overflow-y: auto; }
+.dash-today-item { border-bottom: 1px dashed var(--border); padding: .45rem 0; cursor: pointer; }
+.dash-today-item:last-child { border-bottom: none; }
+.dash-today-item:hover { background: rgba(168,117,8,.08); border-radius: 8px; }
+.dash-today-item .dti-title { font-weight: 700; color: var(--navy); font-size: .86rem; }
+.dash-today-item .dti-sub { font-size: .74rem; color: var(--text-muted); }
+.dash-today-item.overdue .dti-title { color: #b91c1c; }
+.dash-today-empty { color: var(--text-muted); font-size: .82rem; padding: .5rem 0; }
+@media (max-width: 1100px) { .dash-today-grid { grid-template-columns: 1fr; } }
+
+/* لوحة صحة المكتب (بوابة المالك) */
+.fm-health-panel { border-top: 3px solid var(--navy); }
+.portal-health-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .6rem; }
+.portal-health-item { background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: .6rem .7rem; }
+.portal-health-item .ph-label { display: block; font-size: .75rem; color: var(--text-muted); }
+.portal-health-item strong { color: var(--navy); font-size: 1.1rem; }
+@media (max-width: 1100px) { .portal-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .portal-health-grid { grid-template-columns: 1fr; } }
 </style>
 <div class="modal fade" id="fmCommandPalette" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered">
