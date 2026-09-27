@@ -377,27 +377,90 @@
                         <button class="btn btn-outline-primary quick-action" onclick="openAdvancedSearchModal()"><i class="bi bi-search"></i> بحث</button>
                         <button class="btn btn-outline-secondary quick-action" onclick="syncWithSupabase()"><i class="bi bi-arrow-repeat"></i> مزامنة</button>
                     </div>
+                    <div class="fm-overdue-dashboard" id="fmOverdueDashboard" aria-live="polite"></div>
                     <div class="cases-container">
                     <div class="cases-list">
-                        <div class="filter-bar">
-                            <input type="text" id="caseSearchInput" class="form-control" placeholder="بحث باسم العميل أو المحكمة أو رقم الملف..." onkeyup="filterCasesList()">
-                            <select id="courtFilter" class="form-select" onchange="filterCasesList()">
-                                <option value="">كل المحاكم</option>
-                                <option>محكمة الأسرة</option><option>المحكمة الجزئية</option><option>المحكمة الابتدائية</option>
-                                <option>محكمة الاستئناف</option><option>المحكمة العمالية</option><option>المحكمة الاقتصادية</option>
-                                <option>المحكمة الادارية</option><option>محكمة القضاء الاداري</option><option>المحكمة الادارية العليا</option>
-                                <option>محكمة النقض</option>
-                            </select>
-                            <select id="serviceFilter" class="form-select" onchange="filterCasesList()">
-                                <option value="">كل الخدمات</option>
-                                <option value="main_file">ملف رئيسي (MJ)</option>
-                                <option value="judicial">ملف قضائي</option>
-                                <option value="real_estate">تسجيل شهر عقاري</option>
-                                <option value="contract_writing">كتابة عقد</option>
-                                <option value="company_formation">تأسيس شركة</option>
-                                <option value="prosecution_investigation">تحقيق نيابة</option>
-                                <option value="detention_renewal">تجديد حبس</option>
-                            </select>
+                        <div class="fm-toolbar">
+                            <div class="fm-search-wrap">
+                                <i class="bi bi-search"></i>
+                                <input type="text" id="caseSearchInput" class="form-control" placeholder="بحث باسم العميل أو المحكمة أو رقم الملف..." onkeyup="filterCasesList()">
+                            </div>
+                            <div class="fm-toolbar-actions">
+                                <button type="button" class="fm-icon-btn" id="fmViewCardsBtn" onclick="FMPro.setView('cards')" title="عرض بطاقات"><i class="bi bi-grid-3x3-gap-fill"></i></button>
+                                <button type="button" class="fm-icon-btn" id="fmViewTableBtn" onclick="FMPro.setView('table')" title="عرض جدولي"><i class="bi bi-table"></i></button>
+                                <button type="button" class="fm-icon-btn" id="fmFiltersToggleBtn" onclick="FMPro.toggleAdvancedFilters()" title="فلاتر متقدمة"><i class="bi bi-funnel"></i><span class="fm-badge-count" id="fmFilterCount" style="display:none">0</span></button>
+                                <button type="button" class="fm-icon-btn" id="fmBulkToggleBtn" onclick="FMPro.toggleBulkMode()" title="إجراءات جماعية"><i class="bi bi-check2-square"></i></button>
+                                <button type="button" class="fm-icon-btn" onclick="FMPro.openPalette()" title="بحث ذكي موحّد (Ctrl+K)"><i class="bi bi-command"></i></button>
+                            </div>
+                        </div>
+                        <div class="fm-advanced-filters" id="fmAdvancedFilters" style="display:none">
+                            <div class="fm-filters-grid">
+                                <div><label>النوع / الخدمة</label>
+                                    <select id="serviceFilter" class="form-select" onchange="FMPro.onFilterChange()">
+                                        <option value="">كل الخدمات</option>
+                                        <option value="main_file">ملف رئيسي (MJ)</option>
+                                        <option value="judicial">ملف قضائي</option>
+                                        <option value="real_estate">تسجيل شهر عقاري</option>
+                                        <option value="contract_writing">كتابة عقد</option>
+                                        <option value="company_formation">تأسيس شركة</option>
+                                        <option value="prosecution_investigation">تحقيق نيابة</option>
+                                        <option value="detention_renewal">تجديد حبس</option>
+                                    </select>
+                                </div>
+                                <div><label>التصنيف</label>
+                                    <select id="fmFilterCategory" class="form-select" onchange="FMPro.onFilterChange()">
+                                        <option value="">كل التصنيفات</option>
+                                        <option value="judicial">قضائي</option>
+                                        <option value="professional">خدمي / إجرائي</option>
+                                        <option value="general">أعمال عامة</option>
+                                    </select>
+                                </div>
+                                <div><label>الحالة</label>
+                                    <select id="fmFilterStatus" class="form-select" onchange="FMPro.onFilterChange()">
+                                        <option value="">كل الحالات</option>
+                                        <option value="new">جديد</option>
+                                        <option value="submitting">قيد الرفع</option>
+                                        <option value="in_progress">قيد العمل</option>
+                                        <option value="needs_action">يحتاج إجراء</option>
+                                        <option value="on_hold">متوقف</option>
+                                        <option value="completed">مكتمل</option>
+                                        <option value="archived">مؤرشف</option>
+                                        <option value="قيد النظر">قيد النظر</option>
+                                        <option value="مؤجلة">مؤجلة</option>
+                                        <option value="للحكم">للحكم</option>
+                                        <option value="تم الحكم">تم الحكم</option>
+                                        <option value="منتهية">منتهية</option>
+                                    </select>
+                                </div>
+                                <div><label>المحكمة</label>
+                                    <select id="courtFilter" class="form-select" onchange="FMPro.onFilterChange()">
+                                        <option value="">كل المحاكم</option>
+                                        <option>محكمة الأسرة</option><option>المحكمة الجزئية</option><option>المحكمة الابتدائية</option>
+                                        <option>محكمة الاستئناف</option><option>المحكمة العمالية</option><option>المحكمة الاقتصادية</option>
+                                        <option>المحكمة الادارية</option><option>محكمة القضاء الاداري</option><option>المحكمة الادارية العليا</option>
+                                        <option>محكمة النقض</option>
+                                    </select>
+                                </div>
+                                <div><label>المسؤول</label><input id="fmFilterResponsible" class="form-control" onkeyup="FMPro.onFilterChange()" placeholder="اسم المسؤول"></div>
+                                <div><label>من تاريخ</label><input type="date" id="fmFilterDateFrom" class="form-control" onchange="FMPro.onFilterChange()"></div>
+                                <div><label>إلى تاريخ</label><input type="date" id="fmFilterDateTo" class="form-control" onchange="FMPro.onFilterChange()"></div>
+                            </div>
+                            <div class="fm-presets-row">
+                                <select id="fmPresetSelect" class="form-select" onchange="FMPro.applyPreset(this.value)"><option value="">— فلاتر محفوظة —</option></select>
+                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="FMPro.savePreset()"><i class="bi bi-bookmark-plus"></i> حفظ الفلتر</button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" onclick="FMPro.deletePreset()"><i class="bi bi-trash"></i> حذف</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="FMPro.clearFilters()"><i class="bi bi-x-circle"></i> مسح الفلاتر</button>
+                            </div>
+                        </div>
+                        <div class="fm-bulk-bar" id="fmBulkBar" style="display:none">
+                            <span class="fm-bulk-count"><strong id="fmBulkCount">0</strong> ملف محدّد</span>
+                            <div class="fm-bulk-actions">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="FMPro.bulkArchive()"><i class="bi bi-archive"></i> أرشفة</button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="FMPro.bulkSetStatus()"><i class="bi bi-arrow-repeat"></i> تغيير الحالة</button>
+                                <button type="button" class="btn btn-sm btn-outline-success" onclick="FMPro.bulkExport()"><i class="bi bi-filetype-csv"></i> تصدير CSV</button>
+                                <button type="button" class="btn btn-sm btn-outline-warning" onclick="FMPro.selectAllVisible()">تحديد الكل</button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" onclick="FMPro.clearSelection()">إلغاء التحديد</button>
+                            </div>
                         </div>
                         <div id="casesListContainer" style="max-height: 65vh; overflow-y: auto;"></div>
                     </div>
@@ -871,7 +934,89 @@ label, .form-label { color:var(--text) !important; font-weight:700; }
 #caseSearchResults > div { color: var(--text) !important; }
 #caseSearchResults > div:hover { background: rgba(168,117,8,.10); }
 @media (max-width: 900px) { .session-form-grid { grid-template-columns: 1fr; } .session-form-actions .gold-btn { width: 100%; } }
+
+/* ===== ترقية قسم إدارة الملفات: لوحة المتأخرات، الفلاتر المتقدمة، العرض الجدولي، الإجراءات الجماعية، البحث الذكي ===== */
+.fm-overdue-dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: .75rem; margin-bottom: 1rem; }
+.fm-stat-card { background: #fff; border: 1px solid var(--border); border-right: 5px solid var(--navy); border-radius: 12px; padding: .7rem 1rem; cursor: pointer; transition: .2s; box-shadow: 0 4px 14px rgba(18,51,91,.06); }
+.fm-stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(18,51,91,.12); }
+.fm-stat-card.danger { border-right-color: var(--danger); }
+.fm-stat-card.warning { border-right-color: #c98a00; }
+.fm-stat-card.success { border-right-color: var(--success); }
+.fm-stat-card.active { background: rgba(168,117,8,.12); border-color: var(--gold); }
+.fm-stat-card small { display: block; color: var(--muted); font-weight: 700; }
+.fm-stat-card strong { display: block; font-size: 1.5rem; color: var(--navy); margin-top: .15rem; }
+.fm-stat-card.danger strong { color: var(--danger); }
+.fm-stat-card.success strong { color: var(--success); }
+
+.fm-toolbar { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-bottom: .75rem; }
+.fm-search-wrap { position: relative; flex: 1; min-width: 200px; }
+.fm-search-wrap > i { position: absolute; inset-inline-start: .7rem; top: 50%; transform: translateY(-50%); color: var(--muted); }
+.fm-search-wrap input { padding-inline-start: 2.1rem; }
+.fm-toolbar-actions { display: flex; gap: .35rem; flex-wrap: wrap; }
+.fm-icon-btn { background: #fff; border: 1px solid var(--border); color: var(--navy); border-radius: 9px; padding: .45rem .7rem; cursor: pointer; font-weight: 700; position: relative; transition: .2s; }
+.fm-icon-btn:hover { border-color: var(--navy); }
+.fm-icon-btn.active { background: var(--navy); color: #fff; border-color: var(--navy); }
+.fm-badge-count { background: var(--danger); color: #fff; border-radius: 999px; font-size: .68rem; padding: 0 .38rem; margin-inline-start: .2rem; }
+
+.fm-advanced-filters { background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; padding: 1rem; margin-bottom: .75rem; }
+.fm-filters-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .75rem; }
+.fm-filters-grid label { font-size: .8rem; margin-bottom: .25rem; display: block; }
+.fm-presets-row { display: flex; gap: .5rem; margin-top: .85rem; flex-wrap: wrap; align-items: center; }
+.fm-presets-row .form-select { flex: 1; min-width: 160px; max-width: 260px; }
+
+.fm-bulk-bar { display: flex; justify-content: space-between; align-items: center; gap: .75rem; flex-wrap: wrap; background: #fff7e6; border: 1px solid #f0d9a8; border-radius: 12px; padding: .6rem .9rem; margin-bottom: .75rem; }
+.fm-bulk-count { font-weight: 800; color: var(--navy); }
+.fm-bulk-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
+
+.case-card-item { position: relative; }
+.fm-card-check { position: absolute; inset-inline-start: .6rem; top: .6rem; z-index: 2; }
+.fm-card-item-overdue { border-color: var(--danger) !important; background: rgba(180,59,69,.06) !important; }
+.fm-card-next { font-size: .8rem; color: var(--success); font-weight: 700; }
+.fm-card-next.overdue { color: var(--danger); }
+.fm-overdue-tag { background: var(--danger); color: #fff; border-radius: 6px; padding: .05rem .4rem; font-size: .7rem; font-weight: 800; }
+
+.fm-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: #fff; }
+table.fm-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+table.fm-table th { background: var(--navy); color: #fff; padding: .6rem .7rem; text-align: right; white-space: nowrap; cursor: pointer; position: sticky; top: 0; z-index: 2; }
+table.fm-table th .fm-sort-ind { opacity: .65; margin-inline-start: .3rem; font-size: .75rem; }
+table.fm-table td { padding: .55rem .7rem; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: middle; }
+table.fm-table tbody tr { cursor: pointer; }
+table.fm-table tbody tr:hover { background: rgba(168,117,8,.07); }
+table.fm-table tbody tr.fm-row-overdue { background: rgba(180,59,69,.07); }
+table.fm-table tbody tr.fm-row-overdue td:first-child { box-shadow: inset 4px 0 0 var(--danger); }
+.fm-row-check { width: 38px; text-align: center; }
+
+/* لوحة الأوامر (البحث الذكي الموحّد Ctrl+K) */
+#fmCommandPalette .modal-content { background: #0f172a; color: #fff; border: 1px solid var(--gold); border-radius: 14px; }
+#fmCommandPalette .modal-body { padding: 0; }
+.fm-palette-input-wrap { display: flex; align-items: center; gap: .6rem; padding: 1rem; border-bottom: 1px solid rgba(255,255,255,.12); }
+.fm-palette-input-wrap input { background: transparent; border: none; color: #fff; font-size: 1.1rem; flex: 1; outline: none; }
+.fm-palette-input-wrap input::placeholder { color: #8fa3ba; }
+.fm-palette-results { max-height: 60vh; overflow-y: auto; padding: .5rem; }
+.fm-palette-item { padding: .55rem .8rem; border-radius: 9px; cursor: pointer; display: flex; justify-content: space-between; gap: .6rem; align-items: center; }
+.fm-palette-item:hover, .fm-palette-item.active { background: rgba(168,117,8,.22); }
+.fm-palette-item .fm-palette-title { font-weight: 700; color: #e5c56a; }
+.fm-palette-item .fm-palette-sub { font-size: .78rem; color: #9fb1c6; }
+.fm-palette-group { font-size: .75rem; color: #8fa3ba; font-weight: 800; padding: .5rem .8rem .2rem; }
+.fm-palette-hint { padding: .6rem 1rem; font-size: .75rem; color: #8fa3ba; border-top: 1px solid rgba(255,255,255,.12); }
+.fm-kbd { background: #1c2b45; border: 1px solid #2f4667; border-radius: 5px; padding: 0 .35rem; font-size: .72rem; }
+@media (max-width: 640px) { .fm-toolbar-actions { width: 100%; } .fm-bulk-bar { flex-direction: column; align-items: stretch; } }
 </style>
+<div class="modal fade" id="fmCommandPalette" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-body">
+        <div class="fm-palette-input-wrap">
+          <i class="bi bi-search text-warning"></i>
+          <input id="fmPaletteInput" type="text" placeholder="ابحث في الملفات والقضايا والجلسات والمهام..." autocomplete="off" oninput="FMPro.paletteSearch(this.value)" onkeydown="FMPro.paletteKeydown(event)">
+          <span class="fm-kbd">Esc</span>
+        </div>
+        <div class="fm-palette-results" id="fmPaletteResults"></div>
+        <div class="fm-palette-hint"><span class="fm-kbd">↑</span> <span class="fm-kbd">↓</span> للتنقّل · <span class="fm-kbd">Enter</span> للفتح · <span class="fm-kbd">Ctrl+K</span> للفتح السريع</div>
+      </div>
+    </div>
+  </div>
+</div>
 <div class="modal fade" id="teamManagementModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title gold-text">إدارة فريق المكتب</h5></div><div class="modal-body"><label>البريد أو الهاتف</label><input id="teamInviteContact" class="form-control mb-3" placeholder="member@example.com"><label>الدور</label><select id="teamInviteRole" class="form-select mb-3"><option value="lawyer">محامي</option><option value="staff">سكرتيرة</option><option value="accountant">محاسب</option></select><button class="gold-btn w-100" onclick="createDesktopInvite()">إنشاء كود الدعوة</button><div id="teamInviteResult" class="text-center fw-bold mt-3"></div><hr><button class="btn btn-outline-warning w-100" onclick="createDesktopRecoveryCodes()">إنشاء رموز استرداد المالك</button><pre id="teamRecoveryResult" class="mt-3"></pre></div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button></div></div></div></div>
     <script src="qayd-finance.js"></script>
     <script src="renderer.js"></script>

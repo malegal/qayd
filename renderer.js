@@ -643,6 +643,7 @@ window.loadCasesList = async function() {
             ...allCasesList.map(c => ({ ...c, record_type: 'judicial' })),
             ...professionalFiles.map(f => ({ ...f, record_type: f.file_type }))
         ];
+        await fmComputeMetrics();
         filterCasesList();
     } catch (error) {
         console.error('تعذر تحميل إدارة القضايا:', error);
@@ -650,34 +651,588 @@ window.loadCasesList = async function() {
         if (container) container.innerHTML = `<div class="alert alert-danger">تعذر تحميل الملفات: ${escapeHtml(error.message || 'خطأ غير معروف')}</div>`;
     }
 };
-function filterCasesList() {
-    const search = (document.getElementById('caseSearchInput')?.value || '').trim().toLowerCase();
-    const court = document.getElementById('courtFilter')?.value || '';
-    const service = document.getElementById('serviceFilter')?.value || '';
-    const filtered = allOfficeRecords.filter(record => {
-        const haystack = [record.client_name, record.title, record.court_name, record.case_number, record.case_year, record.file_code, record.case_code, record.case_subject, record.client_phone, record.opponent_name, record.description].filter(Boolean).join(' ').toLowerCase();
-        const matchesService = !service || record.record_type === service || (service === 'judicial' && record.record_type === 'main_file' && (record.file_category === 'judicial' || record.file_type === 'judicial' || record.file_type === 'enforcement'));
-        return (!search || haystack.includes(search)) && (!court || record.court_name === court) && matchesService;
-    });
-    const container = document.getElementById('casesListContainer');
-    if (!container) return;
-    container.innerHTML = filtered.length ? filtered.map(record => {
-        const isMain = record.record_type === 'main_file';
-        const judicial = record.record_type === 'judicial';
-        const label = isMain ? 'ملف رئيسي' : (judicial ? 'ملف قضائي' : professionalTypeLabel(record.record_type));
-        const badge = isMain ? 'bg-warning text-dark' : (judicial ? 'bg-primary' : 'bg-success');
-        const reference = judicial ? `${record.case_number || ''}/${record.case_year || ''}` : record.file_code;
-        const onclick = isMain ? `QMF.openDetails('${record.id}')` : (judicial ? `openCaseDetails('${record.id}')` : `selectProfessionalFile('${record.id}')`);
-        const statusBadge = (isMain || judicial) ? `<span class="badge bg-light text-dark case-status-badge mt-1">${escapeHtml(record.status || (isMain ? 'جديد' : 'جديدة'))}</span>` : '';
-        const sub = isMain ? (record.description || 'ملف رئيسي موحّد — انقر لعرض المراحل والجلسات') : (judicial ? (record.court_name || 'محكمة غير محددة') : 'ملف بلا جلسات محكمة');
-        return `<div class="case-card-item" data-id="${record.id}" onclick="${onclick}">
-          <div class="d-flex justify-content-between gap-2"><strong class="gold-text">${escapeHtml(record.client_name || record.title)}</strong><span class="badge ${badge}">${label}</span></div>
-          <div class="small mt-1">${escapeHtml(record.title || record.case_subject || '')}</div>${statusBadge}
-          <div class="small">${escapeHtml(sub)}${judicial && record.case_type ? ` | ${escapeHtml(record.case_type)}` : ''}</div>
-          <div class="small text-warning mt-1">الكود: ${escapeHtml(record.case_code || record.file_code || 'غير محدد')} · المرجع: ${escapeHtml(reference)}</div>
-        </div>`;
-    }).join('') : '<div class="text-center text-white-50 py-4">لا توجد ملفات مطابقة للبحث أو الفلاتر.</div>';
+/* =========================================================================
+ * FMPro — ترقية قسم إدارة الملفات
+ *   2. عرض جدولي/بطاقات + فرز بالنقر على الأعمدة
+ *   3. فلاتر متقدمة + حفظ فلاتر مفضلة
+ *   4. إجراءات جماعية (أرشفة/تغيير حالة/تصدير)
+ *   5. عمود «الجلسة القادمة» + تمييز المتابعات المتأخرة بالأحمر
+ *   6. بحث ذكي موحّد (Ctrl+K) مع تنقّل بالكيبورد
+ *   9. اختصارات لوحة المفاتيح (Enter فتح، Delete حذف بتأكيد، E تعديل)
+ *  12. لوحة «الأعمال المتأخرة» أعلى القسم
+ * ========================================================================= */
+var FM_STATUS_LABELS = { new: 'جديد', submitting: 'قيد الرفع', in_progress: 'قيد العمل', needs_action: 'يحتاج إجراء', on_hold: 'متوقف', completed: 'مكتمل', archived: 'مؤرشف' };
+var fmState = {
+    view: fmLSGet('fm_view_mode', 'cards'),
+    sortKey: fmLSGet('fm_sort_key', 'updated_at'),
+    sortDir: fmLSGet('fm_sort_dir', 'desc'),
+    bulkMode: false,
+    selected: {},
+    filtered: [],
+    metrics: {},
+    filters: { type: '', category: '', status: '', court: '', responsible: '', dateFrom: '', dateTo: '' },
+    overdueOnly: false,
+    paletteIndex: 0,
+    paletteItems: []
+};
+
+function fmLSGet(key, fallback) { try { var v = localStorage.getItem(key); return v == null ? fallback : v; } catch (e) { return fallback; } }
+function fmLSSet(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* ignore */ } }
+function fmTodayStr() { return new Date().toISOString().slice(0, 10); }
+function fmDateStr(v) { return v ? String(v).slice(0, 10) : ''; }
+
+function fmRecordLabel(record) {
+    if (record.record_type === 'main_file') return 'ملف رئيسي';
+    if (record.record_type === 'judicial') return 'ملف قضائي';
+    return professionalTypeLabel(record.record_type);
 }
+function fmRecordBadgeClass(record) {
+    if (record.record_type === 'main_file') return 'bg-warning text-dark';
+    if (record.record_type === 'judicial') return 'bg-primary';
+    return 'bg-success';
+}
+function fmRecordOnclick(record) {
+    if (record.record_type === 'main_file') return "QMF.openDetails('" + record.id + "')";
+    if (record.record_type === 'judicial') return "openCaseDetails('" + record.id + "')";
+    return "selectProfessionalFile('" + record.id + "')";
+}
+function fmRecordReference(record) {
+    return record.record_type === 'judicial' ? ((record.case_number || '') + '/' + (record.case_year || '')) : (record.file_code || record.case_code || '');
+}
+function fmRecordStatus(record) {
+    return record.status || (record.record_type === 'judicial' ? 'جديدة' : 'جديد');
+}
+function fmRecordTitle(record) {
+    return record.client_name || record.title || 'بدون اسم';
+}
+function fmRecordSubtitle(record) {
+    if (record.record_type === 'main_file') return record.description || 'ملف رئيسي موحّد — انقر لعرض المراحل والجلسات';
+    if (record.record_type === 'judicial') return record.court_name || 'محكمة غير محددة';
+    return professionalTypeLabel(record.record_type) + (record.client_name ? ' · ' + record.client_name : '');
+}
+function fmRecordHaystack(record) {
+    return [record.client_name, record.title, record.court_name, record.case_number, record.case_year, record.file_code, record.case_code, record.case_subject, record.client_phone, record.opponent_name, record.description, record.responsible_name].filter(Boolean).join(' ').toLowerCase();
+}
+function fmRecordCategory(record) {
+    if (record.record_type === 'main_file') return record.file_category || ((record.file_type === 'judicial' || record.file_type === 'enforcement') ? 'judicial' : 'professional');
+    if (record.record_type === 'judicial') return 'judicial';
+    return 'professional';
+}
+
+// حساب الجلسة القادمة والمتابعات المتأخرة لكل سجل (5)
+async function fmComputeMetrics() {
+    fmState.metrics = {};
+    var today = fmTodayStr();
+    var sessions = [];
+    try { sessions = await db.sessions.filter(function (s) { return !s.office_id || s.office_id === currentOfficeId; }).toArray(); } catch (e) { sessions = []; }
+    var byCase = {};
+    sessions.forEach(function (s) { if (!s.case_id) return; (byCase[s.case_id] = byCase[s.case_id] || []).push(s); });
+    var stages = [];
+    try { stages = await db.cases.filter(function (c) { return c.legal_file_id; }).toArray(); } catch (e) { stages = []; }
+    var stagesByFile = {};
+    stages.forEach(function (c) { (stagesByFile[c.legal_file_id] = stagesByFile[c.legal_file_id] || []).push(c); });
+    allOfficeRecords.forEach(function (rec) {
+        var recSessions = [];
+        if (rec.record_type === 'main_file') {
+            (stagesByFile[rec.id] || []).forEach(function (c) { recSessions = recSessions.concat(byCase[c.id] || []); });
+        } else {
+            recSessions = (byCase[rec.id] || []).slice();
+        }
+        recSessions.sort(function (a, b) { return String(a.session_date || '').localeCompare(String(b.session_date || '')); });
+        var future = recSessions.filter(function (s) { return fmDateStr(s.session_date) >= today; });
+        var past = recSessions.filter(function (s) { return fmDateStr(s.session_date) < today; });
+        var nextSession = future[0] || null;
+        var lastSession = past[past.length - 1] || null;
+        var followupDate = (lastSession && lastSession.followup_date) ? fmDateStr(lastSession.followup_date) : (rec.followup_date ? fmDateStr(rec.followup_date) : '');
+        var nextSessionDate = nextSession ? nextSession.session_date : '';
+        if (!nextSessionDate && rec.metadata && rec.metadata.followup && rec.metadata.followup.next_action_date) {
+            var nd = fmDateStr(rec.metadata.followup.next_action_date);
+            if (nd >= today) nextSessionDate = rec.metadata.followup.next_action_date;
+            else if (nd) followupDate = followupDate || nd;
+        }
+        var overdue = !!(followupDate && followupDate < today && !nextSession) ||
+            !!(lastSession && lastSession.required_action && !nextSession && fmDateStr(lastSession.session_date) < today);
+        var responsible = (lastSession && lastSession.responsible_name) || (nextSession && nextSession.responsible_name) || rec.responsible_name || rec.responsible_user_id || rec.assigned_to || '';
+        fmState.metrics[rec.id] = {
+            nextSessionDate: nextSessionDate,
+            lastSessionDate: lastSession ? lastSession.session_date : '',
+            followupDate: followupDate,
+            overdue: overdue,
+            responsible: responsible,
+            sessionsCount: recSessions.length
+        };
+    });
+}
+
+function fmReadFilters() {
+    function val(id) { var el = document.getElementById(id); return el ? (el.value || '') : ''; }
+    fmState.filters = {
+        type: val('serviceFilter'),
+        category: val('fmFilterCategory'),
+        status: val('fmFilterStatus'),
+        court: val('courtFilter'),
+        responsible: val('fmFilterResponsible'),
+        dateFrom: val('fmFilterDateFrom'),
+        dateTo: val('fmFilterDateTo')
+    };
+    return fmState.filters;
+}
+function fmApplyFilters(records) {
+    var searchEl = document.getElementById('caseSearchInput');
+    var search = ((searchEl && searchEl.value) || '').trim().toLowerCase();
+    var f = fmState.filters;
+    return records.filter(function (record) {
+        if (search && fmRecordHaystack(record).indexOf(search) === -1) return false;
+        if (f.court && record.court_name !== f.court) return false;
+        if (f.category && fmRecordCategory(record) !== f.category) return false;
+        if (f.type) {
+            var matchType = record.record_type === f.type ||
+                (f.type === 'judicial' && record.record_type === 'main_file' && (record.file_category === 'judicial' || record.file_type === 'judicial' || record.file_type === 'enforcement'));
+            if (!matchType) return false;
+        }
+        if (f.status) {
+            var raw = String(record.status || '').toLowerCase();
+            var label = FM_STATUS_LABELS[f.status] ? String(FM_STATUS_LABELS[f.status]).toLowerCase() : '';
+            if (raw !== f.status.toLowerCase() && (!label || raw !== label)) return false;
+        }
+        if (f.responsible) {
+            var m = fmState.metrics[record.id] || {};
+            var resp = String(m.responsible || record.responsible_name || '').toLowerCase();
+            if (resp.indexOf(f.responsible.toLowerCase()) === -1) return false;
+        }
+        if (f.dateFrom || f.dateTo) {
+            var d = fmDateStr(record.updated_at || record.created_at || record.session_date || '');
+            if (!d) return false;
+            if (f.dateFrom && d < f.dateFrom) return false;
+            if (f.dateTo && d > f.dateTo) return false;
+        }
+        if (fmState.overdueOnly) {
+            var mm = fmState.metrics[record.id] || {};
+            if (!mm.overdue) return false;
+        }
+        return true;
+    });
+}
+function fmSortRecords(records) {
+    var key = fmState.sortKey, dir = fmState.sortDir === 'asc' ? 1 : -1;
+    function val(rec) {
+        var m = fmState.metrics[rec.id] || {};
+        switch (key) {
+            case 'client': return fmRecordTitle(rec);
+            case 'type': return fmRecordLabel(rec);
+            case 'status': return fmRecordStatus(rec);
+            case 'court': return rec.court_name || '';
+            case 'next_session': return m.nextSessionDate || '9999';
+            case 'responsible': return m.responsible || '';
+            case 'code': return rec.file_code || rec.case_code || '';
+            case 'overdue': return m.overdue ? 1 : 0;
+            case 'updated_at':
+            default: return rec.updated_at || rec.created_at || '';
+        }
+    }
+    return records.slice().sort(function (a, b) {
+        var av = val(a), bv = val(b);
+        if (av < bv) return -1 * dir;
+        if (av > bv) return 1 * dir;
+        return 0;
+    });
+}
+
+function fmRenderCards(records) {
+    if (!records.length) return '<div class="text-center text-white-50 py-4">لا توجد ملفات مطابقة للبحث أو الفلاتر.</div>';
+    return records.map(function (record) {
+        var m = fmState.metrics[record.id] || {};
+        var isMain = record.record_type === 'main_file';
+        var judicial = record.record_type === 'judicial';
+        var label = fmRecordLabel(record);
+        var badge = fmRecordBadgeClass(record);
+        var reference = fmRecordReference(record);
+        var onclick = fmRecordOnclick(record);
+        var statusBadge = (isMain || judicial) ? '<span class="badge bg-light text-dark case-status-badge mt-1">' + escapeHtml(fmRecordStatus(record)) + '</span>' : '';
+        var sub = fmRecordSubtitle(record);
+        var nextTxt = m.nextSessionDate ? new Date(m.nextSessionDate).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' }) : 'لا يوجد';
+        var checked = fmState.selected[record.id] ? 'checked' : '';
+        var check = fmState.bulkMode ? '<input type="checkbox" class="form-check-input fm-card-check" ' + checked + ' onclick="event.stopPropagation(); FMPro.toggleSelect(\'' + record.id + '\', this.checked)">' : '';
+        var overdueTag = m.overdue ? '<span class="fm-overdue-tag">متابعة متأخرة</span>' : '';
+        return '<div class="case-card-item' + (m.overdue ? ' fm-card-item-overdue' : '') + '" data-id="' + record.id + '" tabindex="0" onclick="' + onclick + '">' +
+          check +
+          '<div class="d-flex justify-content-between gap-2"><strong class="gold-text">' + escapeHtml(fmRecordTitle(record)) + '</strong><span class="badge ' + badge + '">' + label + '</span></div>' +
+          '<div class="small mt-1">' + escapeHtml(record.title || record.case_subject || '') + '</div>' + statusBadge + ' ' + overdueTag +
+          '<div class="small">' + escapeHtml(sub) + (judicial && record.case_type ? ' | ' + escapeHtml(record.case_type) : '') + '</div>' +
+          '<div class="small text-warning mt-1">الكود: ' + escapeHtml(record.case_code || record.file_code || 'غير محدد') + ' · المرجع: ' + escapeHtml(reference) + '</div>' +
+          '<div class="fm-card-next' + (m.overdue ? ' overdue' : '') + ' mt-1"><i class="bi bi-calendar-event"></i> الجلسة القادمة: ' + escapeHtml(nextTxt) + (m.responsible ? ' · المسؤول: ' + escapeHtml(m.responsible) : '') + '</div>' +
+        '</div>';
+    }).join('');
+}
+
+function fmRenderTable(records) {
+    if (!records.length) return '<div class="text-center text-white-50 py-4">لا توجد ملفات مطابقة للبحث أو الفلاتر.</div>';
+    var cols = [
+        { key: 'code', label: 'الكود' },
+        { key: 'client', label: 'العميل / العنوان' },
+        { key: 'type', label: 'النوع' },
+        { key: 'status', label: 'الحالة' },
+        { key: 'court', label: 'المحكمة' },
+        { key: 'next_session', label: 'الجلسة القادمة' },
+        { key: 'responsible', label: 'المسؤول' }
+    ];
+    var head = cols.map(function (c) {
+        var ind = fmState.sortKey === c.key ? (fmState.sortDir === 'asc' ? '▲' : '▼') : '↕';
+        return '<th onclick="FMPro.sortBy(\'' + c.key + '\')">' + c.label + '<span class="fm-sort-ind">' + ind + '</span></th>';
+    }).join('');
+    var body = records.map(function (record) {
+        var m = fmState.metrics[record.id] || {};
+        var checked = fmState.selected[record.id] ? 'checked' : '';
+        var check = fmState.bulkMode ? '<td class="fm-row-check"><input type="checkbox" class="form-check-input" ' + checked + ' onclick="event.stopPropagation(); FMPro.toggleSelect(\'' + record.id + '\', this.checked)"></td>' : '';
+        var nextTxt = m.nextSessionDate ? new Date(m.nextSessionDate).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+        return '<tr class="' + (m.overdue ? 'fm-row-overdue' : '') + '" data-id="' + record.id + '" onclick="' + fmRecordOnclick(record) + '">' +
+          check +
+          '<td>' + escapeHtml(record.file_code || record.case_code || '—') + '</td>' +
+          '<td><strong>' + escapeHtml(fmRecordTitle(record)) + '</strong><div class="small text-muted">' + escapeHtml(record.title || record.case_subject || '') + '</div></td>' +
+          '<td><span class="badge ' + fmRecordBadgeClass(record) + '">' + fmRecordLabel(record) + '</span></td>' +
+          '<td>' + escapeHtml(fmRecordStatus(record)) + '</td>' +
+          '<td>' + escapeHtml(record.court_name || '—') + '</td>' +
+          '<td class="' + (m.overdue ? 'text-danger fw-bold' : '') + '">' + escapeHtml(nextTxt) + (m.overdue ? ' ⚠' : '') + '</td>' +
+          '<td>' + escapeHtml(m.responsible || '—') + '</td>' +
+        '</tr>';
+    }).join('');
+    return '<div class="fm-table-wrap"><table class="fm-table"><thead><tr>' + (fmState.bulkMode ? '<th class="fm-row-check"></th>' : '') + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+}
+
+function fmComputeDashboardStats() {
+    var today = fmTodayStr();
+    var weekEnd = new Date(); weekEnd.setDate(weekEnd.getDate() + 7);
+    var weekEndStr = weekEnd.toISOString().slice(0, 10);
+    var overdue = 0, week = 0, noNext = 0;
+    allOfficeRecords.forEach(function (rec) {
+        var m = fmState.metrics[rec.id] || {};
+        if (m.overdue) overdue++;
+        var nd = fmDateStr(m.nextSessionDate);
+        if (nd && nd >= today && nd <= weekEndStr) week++;
+        if (!m.nextSessionDate) noNext++;
+    });
+    return { overdue: overdue, week: week, noNext: noNext, total: allOfficeRecords.length };
+}
+function fmUpdateOverdueDashboard() {
+    var host = document.getElementById('fmOverdueDashboard');
+    if (!host) return;
+    var s = fmComputeDashboardStats();
+    host.innerHTML =
+      '<div class="fm-stat-card danger' + (fmState.overdueOnly ? ' active' : '') + '" onclick="FMPro.toggleOverdueOnly()"><small><i class="bi bi-exclamation-triangle"></i> متابعات متأخرة</small><strong>' + s.overdue + '</strong></div>' +
+      '<div class="fm-stat-card success"><small><i class="bi bi-calendar-week"></i> جلسات هذا الأسبوع</small><strong>' + s.week + '</strong></div>' +
+      '<div class="fm-stat-card warning"><small><i class="bi bi-calendar-x"></i> بلا جلسة قادمة</small><strong>' + s.noNext + '</strong></div>' +
+      '<div class="fm-stat-card"><small><i class="bi bi-folder2-open"></i> إجمالي الملفات</small><strong>' + s.total + '</strong></div>';
+}
+function fmSelectedIds() { return Object.keys(fmState.selected).filter(function (id) { return fmState.selected[id]; }); }
+function fmUpdateBulkBar() {
+    var bar = document.getElementById('fmBulkBar');
+    if (!bar) return;
+    bar.style.display = fmState.bulkMode ? 'flex' : 'none';
+    var c = document.getElementById('fmBulkCount');
+    if (c) c.textContent = String(fmSelectedIds().length);
+}
+function fmUpdateFilterCount() {
+    var f = fmState.filters, n = 0;
+    ['type', 'category', 'status', 'court', 'responsible', 'dateFrom', 'dateTo'].forEach(function (k) { if (f[k]) n++; });
+    var badge = document.getElementById('fmFilterCount');
+    if (badge) { badge.textContent = String(n); badge.style.display = n ? 'inline-block' : 'none'; }
+    var btn = document.getElementById('fmFiltersToggleBtn');
+    if (btn) btn.classList.toggle('active', n > 0);
+}
+function fmUpdateViewButtons() {
+    var c = document.getElementById('fmViewCardsBtn'), t = document.getElementById('fmViewTableBtn'), b = document.getElementById('fmBulkToggleBtn');
+    if (c) c.classList.toggle('active', fmState.view === 'cards');
+    if (t) t.classList.toggle('active', fmState.view === 'table');
+    if (b) b.classList.toggle('active', fmState.bulkMode);
+}
+
+function filterCasesList() {
+    try {
+        fmReadFilters();
+        var filtered = fmApplyFilters(allOfficeRecords);
+        var sorted = fmSortRecords(filtered);
+        fmState.filtered = sorted;
+        var container = document.getElementById('casesListContainer');
+        if (container) container.innerHTML = fmState.view === 'table' ? fmRenderTable(sorted) : fmRenderCards(sorted);
+        fmUpdateOverdueDashboard();
+        fmUpdateBulkBar();
+        fmUpdateFilterCount();
+        fmUpdateViewButtons();
+    } catch (error) {
+        console.error('filterCasesList failed:', error);
+    }
+}
+
+window.FMPro = {
+    setView: function (view) { fmState.view = view === 'table' ? 'table' : 'cards'; fmLSSet('fm_view_mode', fmState.view); filterCasesList(); },
+    sortBy: function (key) {
+        if (fmState.sortKey === key) fmState.sortDir = fmState.sortDir === 'asc' ? 'desc' : 'asc';
+        else { fmState.sortKey = key; fmState.sortDir = 'asc'; }
+        fmLSSet('fm_sort_key', fmState.sortKey); fmLSSet('fm_sort_dir', fmState.sortDir);
+        filterCasesList();
+    },
+    toggleAdvancedFilters: function () {
+        var panel = document.getElementById('fmAdvancedFilters');
+        if (!panel) return;
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    },
+    onFilterChange: function () { filterCasesList(); },
+    toggleBulkMode: function () {
+        fmState.bulkMode = !fmState.bulkMode;
+        if (!fmState.bulkMode) fmState.selected = {};
+        filterCasesList();
+    },
+    toggleSelect: function (id, checked) { if (checked) fmState.selected[id] = true; else delete fmState.selected[id]; fmUpdateBulkBar(); },
+    selectAllVisible: function () { fmState.filtered.forEach(function (r) { fmState.selected[r.id] = true; }); filterCasesList(); },
+    clearSelection: function () { fmState.selected = {}; filterCasesList(); },
+    toggleOverdueOnly: function () { fmState.overdueOnly = !fmState.overdueOnly; filterCasesList(); },
+    clearFilters: function () {
+        ['serviceFilter', 'fmFilterCategory', 'fmFilterStatus', 'courtFilter'].forEach(function (id) { var el = document.getElementById(id); if (el) el.value = ''; });
+        ['fmFilterResponsible', 'fmFilterDateFrom', 'fmFilterDateTo', 'caseSearchInput'].forEach(function (id) { var el = document.getElementById(id); if (el) el.value = ''; });
+        fmState.overdueOnly = false;
+        filterCasesList();
+    },
+    // (3) حفظ/تحميل/حذف فلاتر مفضلة
+    loadPresets: function () {
+        var presets = [];
+        try { presets = JSON.parse(fmLSGet('fm_filter_presets', '[]')) || []; } catch (e) { presets = []; }
+        var sel = document.getElementById('fmPresetSelect');
+        if (!sel) return presets;
+        sel.innerHTML = '<option value="">— فلاتر محفوظة —</option>' + presets.map(function (p, i) { return '<option value="' + i + '">' + escapeHtml(p.name) + '</option>'; }).join('');
+        return presets;
+    },
+    savePreset: async function () {
+        fmReadFilters();
+        var f = fmState.filters;
+        var hasFilter = Object.keys(f).some(function (k) { return f[k]; });
+        if (!hasFilter) return Swal.fire('تنبيه', 'لا توجد فلاتر نشطة لحفظها', 'warning');
+        var res = await Swal.fire({ title: 'حفظ الفلتر', input: 'text', inputLabel: 'اسم الفلتر', inputPlaceholder: 'مثال: قضايا الأسرة المتأخرة', showCancelButton: true, confirmButtonText: 'حفظ', cancelButtonText: 'إلغاء' });
+        if (!res.isConfirmed || !res.value) return;
+        var presets = [];
+        try { presets = JSON.parse(fmLSGet('fm_filter_presets', '[]')) || []; } catch (e) { presets = []; }
+        presets.push({ name: res.value, filters: JSON.parse(JSON.stringify(f)), overdueOnly: fmState.overdueOnly });
+        fmLSSet('fm_filter_presets', JSON.stringify(presets));
+        window.FMPro.loadPresets();
+        Swal.fire({ icon: 'success', title: 'تم حفظ الفلتر', timer: 1200, showConfirmButton: false });
+    },
+    applyPreset: function (index) {
+        if (index === '' || index == null) return;
+        var presets = [];
+        try { presets = JSON.parse(fmLSGet('fm_filter_presets', '[]')) || []; } catch (e) { presets = []; }
+        var p = presets[Number(index)];
+        if (!p) return;
+        var map = { type: 'serviceFilter', category: 'fmFilterCategory', status: 'fmFilterStatus', court: 'courtFilter', responsible: 'fmFilterResponsible', dateFrom: 'fmFilterDateFrom', dateTo: 'fmFilterDateTo' };
+        Object.keys(map).forEach(function (k) { var el = document.getElementById(map[k]); if (el) el.value = (p.filters && p.filters[k]) || ''; });
+        fmState.overdueOnly = !!p.overdueOnly;
+        filterCasesList();
+    },
+    deletePreset: function () {
+        var sel = document.getElementById('fmPresetSelect');
+        if (!sel || sel.value === '') return Swal.fire('تنبيه', 'اختر فلترًا محفوظًا لحذفه', 'warning');
+        var presets = [];
+        try { presets = JSON.parse(fmLSGet('fm_filter_presets', '[]')) || []; } catch (e) { presets = []; }
+        presets.splice(Number(sel.value), 1);
+        fmLSSet('fm_filter_presets', JSON.stringify(presets));
+        window.FMPro.loadPresets();
+    },
+    // (4) إجراءات جماعية
+    bulkArchive: async function () {
+        var ids = fmSelectedIds();
+        if (!ids.length) return Swal.fire('تنبيه', 'حدّد ملفًا واحدًا على الأقل', 'warning');
+        var res = await Swal.fire({ title: 'أرشفة ' + ids.length + ' ملف؟', icon: 'warning', showCancelButton: true, confirmButtonText: 'أرشفة', cancelButtonText: 'إلغاء' });
+        if (!res.isConfirmed) return;
+        var ok = 0;
+        for (var i = 0; i < ids.length; i++) { try { if (await fmArchiveRecord(ids[i])) ok++; } catch (e) { /* ignore */ } }
+        fmState.selected = {};
+        await loadCasesList();
+        Swal.fire({ icon: 'success', title: 'تمت أرشفة ' + ok + ' ملف', timer: 1400, showConfirmButton: false });
+    },
+    bulkSetStatus: async function () {
+        var ids = fmSelectedIds();
+        if (!ids.length) return Swal.fire('تنبيه', 'حدّد ملفًا واحدًا على الأقل', 'warning');
+        var res = await Swal.fire({
+            title: 'تغيير حالة ' + ids.length + ' ملف', input: 'select', inputValue: 'in_progress',
+            inputOptions: { new: 'جديد', submitting: 'قيد الرفع', in_progress: 'قيد العمل', needs_action: 'يحتاج إجراء', on_hold: 'متوقف', completed: 'مكتمل' },
+            showCancelButton: true, confirmButtonText: 'تطبيق', cancelButtonText: 'إلغاء'
+        });
+        if (!res.isConfirmed || !res.value) return;
+        var ok = 0;
+        for (var i = 0; i < ids.length; i++) { try { if (await fmSetRecordStatus(ids[i], res.value)) ok++; } catch (e) { /* ignore */ } }
+        fmState.selected = {};
+        await loadCasesList();
+        Swal.fire({ icon: 'success', title: 'تم تحديث ' + ok + ' ملف', timer: 1400, showConfirmButton: false });
+    },
+    bulkExport: function () {
+        var ids = fmSelectedIds();
+        if (!ids.length) return Swal.fire('تنبيه', 'حدّد ملفًا واحدًا على الأقل', 'warning');
+        var rows = allOfficeRecords.filter(function (r) { return fmState.selected[r.id]; });
+        var header = ['الكود', 'النوع', 'العميل/العنوان', 'الحالة', 'المحكمة', 'المرجع', 'الجلسة القادمة', 'المسؤول'];
+        var lines = [header.join(',')];
+        rows.forEach(function (r) {
+            var m = fmState.metrics[r.id] || {};
+            var cells = [r.file_code || r.case_code || '', fmRecordLabel(r), fmRecordTitle(r), fmRecordStatus(r), r.court_name || '', fmRecordReference(r), m.nextSessionDate || '', m.responsible || ''];
+            lines.push(cells.map(function (c) { return '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"'; }).join(','));
+        });
+        var csv = '\ufeff' + lines.join('\n');
+        try {
+            var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url; a.download = 'qayd-files-' + fmTodayStr() + '.csv';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (e) { console.error('export failed', e); }
+        Swal.fire({ icon: 'success', title: 'تم تصدير ' + rows.length + ' ملف', timer: 1400, showConfirmButton: false });
+    },
+    // (6) البحث الذكي الموحّد
+    openPalette: function () {
+        if (typeof showModal === 'function') showModal('fmCommandPalette');
+        var input = document.getElementById('fmPaletteInput');
+        if (input) { input.value = ''; setTimeout(function () { input.focus(); }, 200); }
+        window.FMPro.paletteSearch('');
+    },
+    paletteSearch: async function (query) {
+        var host = document.getElementById('fmPaletteResults');
+        if (!host) return;
+        var q = String(query || '').trim().toLowerCase();
+        var items = [];
+        var seen = {};
+        function push(kind, title, sub, action) { if (seen[kind + '|' + title]) return; seen[kind + '|' + title] = 1; items.push({ kind: kind, title: title, sub: sub, action: action }); }
+        try {
+            var sessions = [];
+            try { sessions = await db.sessions.filter(function (s) { return !s.office_id || s.office_id === currentOfficeId; }).toArray(); } catch (e) { sessions = []; }
+            allOfficeRecords.forEach(function (r) {
+                if (q && fmRecordHaystack(r).indexOf(q) === -1) return;
+                var kind = r.record_type === 'main_file' ? 'ملف رئيسي' : (r.record_type === 'judicial' ? 'قضية' : 'ملف خدمي');
+                push(kind, fmRecordTitle(r), fmRecordLabel(r) + ' · ' + (r.file_code || r.case_code || ''), fmRecordOnclick(r));
+            });
+            sessions.forEach(function (s) {
+                var hay = [s.case_status, s.decision, s.session_date, s.court_name, s.circuit, s.required_action].filter(Boolean).join(' ').toLowerCase();
+                if (q && hay.indexOf(q) === -1) return;
+                var when = s.session_date ? new Date(s.session_date).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' }) : '';
+                push('جلسة', when + ' — ' + (s.case_status || ''), s.decision || 'لا يوجد قرار', "openCaseDetails('" + s.case_id + "')");
+            });
+        } catch (e) { /* ignore */ }
+        fmState.paletteItems = items;
+        fmState.paletteIndex = 0;
+        if (!items.length) { host.innerHTML = '<div class="text-center text-white-50 small py-3">لا توجد نتائج مطابقة.</div>'; return; }
+        host.innerHTML = items.map(function (it, i) {
+            return '<div class="fm-palette-item' + (i === 0 ? ' active' : '') + '" data-index="' + i + '" onclick="FMPro.paletteChoose(' + i + ')"><div><div class="fm-palette-title">' + escapeHtml(it.title) + '</div><div class="fm-palette-sub">' + escapeHtml(it.sub || '') + '</div></div><span class="badge bg-secondary">' + escapeHtml(it.kind) + '</span></div>';
+        }).join('');
+    },
+    paletteKeydown: function (event) {
+        var items = fmState.paletteItems;
+        if (event.key === 'ArrowDown') { event.preventDefault(); fmState.paletteIndex = Math.min(fmState.paletteIndex + 1, items.length - 1); window.FMPro.paletteHighlight(); }
+        else if (event.key === 'ArrowUp') { event.preventDefault(); fmState.paletteIndex = Math.max(fmState.paletteIndex - 1, 0); window.FMPro.paletteHighlight(); }
+        else if (event.key === 'Enter') { event.preventDefault(); window.FMPro.paletteChoose(fmState.paletteIndex); }
+        else if (event.key === 'Escape') { if (typeof hideModal === 'function') hideModal('fmCommandPalette'); }
+    },
+    paletteHighlight: function () {
+        var host = document.getElementById('fmPaletteResults');
+        if (!host) return;
+        var nodes = host.querySelectorAll('.fm-palette-item');
+        nodes.forEach(function (n, i) { n.classList.toggle('active', i === fmState.paletteIndex); });
+        var active = nodes[fmState.paletteIndex];
+        if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+    },
+    paletteChoose: function (index) {
+        var it = fmState.paletteItems[index];
+        if (!it) return;
+        if (typeof hideModal === 'function') hideModal('fmCommandPalette');
+        if (typeof showTab === 'function') showTab('cases');
+        try { (new Function(it.action))(); } catch (e) { console.error('palette action failed', e); }
+    }
+};
+
+// (9) اختصارات لوحة المفاتيح داخل قسم إدارة الملفات
+function fmIsTypingContext(el) {
+    if (!el) return false;
+    var tag = (el.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
+}
+function fmSelectedOrFirstId() {
+    var ids = fmSelectedIds();
+    if (ids.length) return ids[0];
+    return fmState.filtered.length ? fmState.filtered[0].id : null;
+}
+window.fmHandleKeydown = function (event) {
+    // Ctrl/Cmd+K يفتح البحث الذكي من أي مكان
+    if ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === 'k') {
+        event.preventDefault(); window.FMPro.openPalette(); return;
+    }
+    var casesPane = document.getElementById('cases');
+    if (!casesPane || !casesPane.classList.contains('active')) return;
+    if (fmIsTypingContext(event.target)) return;
+    var id = fmSelectedOrFirstId();
+    if (!id) return;
+    var record = allOfficeRecords.find(function (r) { return r.id === id; });
+    if (!record) return;
+    if (event.key === 'Enter') { event.preventDefault(); try { (new Function(fmRecordOnclick(record)))(); } catch (e) { /* ignore */ } }
+    else if (String(event.key).toLowerCase() === 'e') { event.preventDefault(); window.fmEditRecord(record); }
+    else if (event.key === 'Delete') { event.preventDefault(); window.fmDeleteRecord(record); }
+};
+window.fmEditRecord = function (record) {
+    if (record.record_type === 'main_file') { if (window.QMF && QMF.editMainFile) QMF.editMainFile(record.id); return; }
+    if (record.record_type === 'judicial') {
+        if (typeof openCaseDetails === 'function') openCaseDetails(record.id).then(function () { if (typeof openEditCaseModalFromPanel === 'function') openEditCaseModalFromPanel(); });
+        return;
+    }
+    if (typeof editProfessionalFile === 'function') editProfessionalFile(record.id);
+};
+window.fmDeleteRecord = async function (record) {
+    if (record.record_type === 'main_file') { if (window.QMF && QMF.deleteMainFile) QMF.deleteMainFile(record.id); return; }
+    if (record.record_type === 'judicial') {
+        if (typeof openCaseDetails === 'function') await openCaseDetails(record.id);
+        if (typeof showCaseOptions === 'function') showCaseOptions();
+        return;
+    }
+    if (typeof deleteProfessionalFile === 'function') deleteProfessionalFile(record.id);
+};
+
+// أرشفة/تغيير حالة سجل واحد (تُستخدم في الإجراءات الجماعية)
+async function fmArchiveRecord(id) {
+    var record = allOfficeRecords.find(function (r) { return r.id === id; });
+    if (!record) return false;
+    if (record.record_type === 'main_file') {
+        await db.legalFiles.update(id, { status: 'archived', archived: 1, updated_at: new Date().toISOString() });
+        await db.pendingOperations.add({ operation: 'upsert_legal_file', data: { id: id, status: 'archived', archived: 1 }, timestamp: Date.now() });
+        return true;
+    }
+    if (record.record_type === 'judicial') {
+        await db.cases.update(id, { archived: 1, status: 'مؤرشفة', updated_at: new Date().toISOString() });
+        await db.pendingOperations.add({ operation: 'update_case', data: { id: id, archived: 1, status: 'مؤرشفة' }, timestamp: Date.now() });
+        return true;
+    }
+    await db.officeFiles.update(id, { archived: true, updated_at: new Date().toISOString() });
+    await db.pendingOperations.add({ operation: 'update_office_file', data: { id: id, archived: true }, timestamp: Date.now() });
+    return true;
+}
+async function fmSetRecordStatus(id, status) {
+    var record = allOfficeRecords.find(function (r) { return r.id === id; });
+    if (!record) return false;
+    if (record.record_type === 'main_file') {
+        await db.legalFiles.update(id, { status: status, updated_at: new Date().toISOString() });
+        await db.pendingOperations.add({ operation: 'upsert_legal_file', data: { id: id, status: status }, timestamp: Date.now() });
+        return true;
+    }
+    if (record.record_type === 'judicial') {
+        await db.cases.update(id, { status: status, updated_at: new Date().toISOString() });
+        await db.pendingOperations.add({ operation: 'update_case', data: { id: id, status: status }, timestamp: Date.now() });
+        return true;
+    }
+    await db.officeFiles.update(id, { status: status, updated_at: new Date().toISOString() });
+    await db.pendingOperations.add({ operation: 'update_office_file', data: { id: id, status: status }, timestamp: Date.now() });
+    return true;
+}
+
+// تهيئة مكوّنات FMPro عند تحميل المستند
+function fmBoot() {
+    try { window.FMPro.loadPresets(); } catch (e) { /* ignore */ }
+    try { document.addEventListener('keydown', window.fmHandleKeydown); } catch (e) { /* ignore */ }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fmBoot);
+else fmBoot();
+
 function escapeHtml(str) { if (!str) return ''; return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m])); }
 window.editProfessionalFile = async function(id) { const file = await db.officeFiles.get(id); if (!file) return; const f = file.metadata?.followup || {}; document.getElementById('editingProfessionalFileId').value = id; document.getElementById('professionalFileType').value = file.file_type; document.getElementById('professionalFileTitle').value = file.title || ''; document.getElementById('professionalAuthorityFileNumber').value = file.authority_file_number || ''; document.getElementById('professionalAuthorityFileYear').value = file.authority_file_year || ''; document.getElementById('professionalAuthorityName').value = file.authority_name || ''; document.getElementById('professionalClientName').value = file.client_name || ''; document.getElementById('professionalClientRole').value = file.client_role || ''; document.getElementById('professionalClientPhone').value = file.client_phone || ''; document.getElementById('professionalClientNationalId').value = file.client_national_id || ''; document.getElementById('professionalClientEmail').value = file.client_email || ''; document.getElementById('professionalClientAddress').value = file.client_address || ''; document.getElementById('professionalOpponentName').value = file.opponent_name || ''; document.getElementById('professionalOpponentRole').value = file.opponent_role || ''; document.getElementById('professionalOpponentPhone').value = file.opponent_phone || ''; document.getElementById('professionalOpponentNationalId').value = file.opponent_national_id || ''; document.getElementById('professionalOpponentEmail').value = file.opponent_email || ''; document.getElementById('professionalOpponentAddress').value = file.opponent_address || ''; document.getElementById('professionalFileDescription').value = file.description || ''; document.getElementById('professionalLastActionDate').value = f.last_action_date || ''; document.getElementById('professionalLastAction').value = f.last_action || ''; document.getElementById('professionalNextActionDate').value = f.next_action_date || ''; document.getElementById('professionalNextAction').value = f.next_action || ''; document.getElementById('professionalFileSaveButton').textContent = 'حفظ التعديلات'; showModal('professionalFileModal'); };
 window.addProfessionalDocument = async function(id) { const file = await db.officeFiles.get(id); if (!file || !ipcRenderer?.selectProfessionalDocument) return; const sources = await ipcRenderer.selectProfessionalDocument(); if (!sources || !sources.length) return; const selected = await Swal.fire({ title: 'طريقة إضافة مستندات الملف', input: 'radio', inputOptions: { copy: 'نسخ المستندات مع إبقاء الأصل', move: 'نقل المستندات وحذف الأصل من مكانه' }, inputValue: 'copy', showCancelButton: true, confirmButtonText: 'متابعة', cancelButtonText: 'إلغاء', background: '#0f172a', color: '#fff' }); if (!selected.isConfirmed) return; const result = await ipcRenderer.copyProfessionalDocument(sources, file.file_code, file.client_name, file.file_type, selected.value || 'copy'); if (!result?.success) return Swal.fire('خطأ', result?.error || 'تعذر إضافة المستندات', 'error'); Swal.fire({ icon: 'success', title: selected.value === 'move' ? 'تم نقل المستندات' : 'تم نسخ المستندات', text: `عدد المستندات: ${result.count || 0}`, timer: 1500, showConfirmButton: false }); };
