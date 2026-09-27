@@ -1803,6 +1803,322 @@ window.printCasePDF = async function() {
     if (ipcRenderer?.printArabicPdf) await ipcRenderer.printArabicPdf(html, `ملف_${c.case_number || 'تقرير'}.pdf`);
 };
 
+async function ensureOwnerMembership() {
+    try {
+        if (!supabaseClient || !currentOfficeId) return;
+        await supabaseClient.rpc('ensure_owner_membership', { p_office_id: currentOfficeId });
+    } catch (e) {
+        console.warn('ensure_owner_membership غير متاح (يلزم تطبيق migration المالك):', e?.message || e);
+    }
+}
+
+async function ensureDesktopSupabaseSession() {
+    if (!supabaseClient) await initSupabase();
+    if (!supabaseClient || !currentOfficeId) return false;
+    const office = await db.offices.where('office_id').equals(currentOfficeId).first();
+    if (!office?.email || !office?.pin) return false;
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session?.user?.email?.toLowerCase() === String(office.email).toLowerCase()) {
+        await ensureOwnerMembership();
+        const { data: membership } = await supabaseClient.from('office_members').select('role').eq('office_id', currentOfficeId).eq('user_id', session.user.id).maybeSingle();
+        currentUserRole = isOwnerEmail(office.email) ? 'manager' : (membership?.role || null);
+        document.querySelector('#finance-tab')?.classList.toggle('d-none', !canSeeFinance());
+        document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', false);
+        const ownerReviewBtn = document.querySelector('#ownerReviewBtn'); if (ownerReviewBtn) ownerReviewBtn.style.display = 'block';
+        return true;
+    }
+    let { error } = await supabaseClient.auth.signInWithPassword({ email: office.email, password: office.pin });
+    if (error && office.email && office.pin) {
+        const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({ email: office.email, password: office.pin });
+        if (!signUpError && signUpData.session) error = null;
+    }
+    if (error) {
+        console.warn('تعذر تسجيل دخول مزامنة سطح المكتب:', error.message);
+        return false;
+    }
+    const { data: membership } = await supabaseClient.from('office_members').select('role').eq('office_id', currentOfficeId).eq('user_id', (await supabaseClient.auth.getUser()).data.user?.id).maybeSingle();
+    currentUserRole = isOwnerEmail(office.email) ? 'manager' : (membership?.role || null);
+    if (isOwnerEmail(office.email) && currentUserRole === 'manager') {
+        await supabaseClient.from('office_members').upsert({ user_id: (await supabaseClient.auth.getUser()).data.user?.id, office_id: currentOfficeId, role: 'manager', display_name: 'محمود عبد الحميد' }, { onConflict: 'user_id,office_id' });
+    }
+    await ensureOwnerMembership();
+    document.querySelector('#finance-tab')?.classList.toggle('d-none', !canSeeFinance());
+    document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', false);
+    const ownerReviewBtn = document.querySelector('#ownerReviewBtn'); if (ownerReviewBtn) ownerReviewBtn.style.display = 'block';
+    return true;
+}
+
+function newSyncOperationId() {
+    return generateUUID();
+}
+
+// ===== مساعدات مزامنة الأحداث (الأجناد) والمهام =====
+// نولّد معرّفًا ثابتًا (remote_id) لكل سجل محلي حتى لا يتكرر على Supabase.
+async function ensureEventRemoteId(localId) {
+    const event = await db.events.get(Number(localId));
+    if (!event) return null;
+    let remoteId = event.remote_id;
+    if (!remoteId) { remoteId = generateUUID(); await db.events.update(event.id, { remote_id: remoteId }); }
+    return { event, remoteId };
+}
+
+async function queueEventSync(localId, operation = 'insert') {
+    try {
+        const info = await ensureEventRemoteId(localId);
+        if (!info) return;
+        const { event, remoteId } = info;
+        await db.pendingOperations.add({
+            operation: operation === 'insert' ? 'insert_event' : 'update_event',
+            data: { remote_id: remoteId, title: event.title || '', date: event.date || null, type: event.type || 'other', created_at: event.created_at || new Date().toISOString() },
+            timestamp: Date.now()
+        });
+        updatePendingBadge();
+    } catch (e) { console.warn('تعذر جدولة مزامنة الحدث', e); }
+}
+
+async function queueEventDelete(localId) {
+    try {
+        const event = await db.events.get(Number(localId));
+        if (!event || !event.remote_id) return;
+        await db.pendingOperations.add({ operation: 'delete_event', data: { remote_id: event.remote_id }, timestamp: Date.now() });
+        updatePendingBadge();
+    } catch (e) { console.warn('تعذر جدولة حذف الحدث', e); }
+}
+
+async function ensureTaskRemoteId(localId) {
+    const task = await db.tasks.get(Number(localId));
+    if (!task) return null;
+    let remoteId = task.remote_id;
+    if (!remoteId) { remoteId = generateUUID(); await db.tasks.update(task.id, { remote_id: remoteId }); }
+    return { task, remoteId };
+}
+
+async function queueTaskSync(localId, operation = 'insert') {
+    try {
+        const info = await ensureTaskRemoteId(localId);
+        if (!info) return;
+        const { task, remoteId } = info;
+        await db.pendingOperations.add({
+            operation: operation === 'insert' ? 'insert_task' : 'update_task',
+            data: { remote_id: remoteId, description: task.description || '', date: task.date || null, completed: !!task.completed },
+            timestamp: Date.now()
+        });
+        updatePendingBadge();
+    } catch (e) { console.warn('تعذر جدولة مزامنة المهمة', e); }
+}
+
+async function queueTaskDelete(localId) {
+    try {
+        const task = await db.tasks.get(Number(localId));
+        if (!task || !task.remote_id) return;
+        await db.pendingOperations.add({ operation: 'delete_task', data: { remote_id: task.remote_id }, timestamp: Date.now() });
+        updatePendingBadge();
+    } catch (e) { console.warn('تعذر جدولة حذف المهمة', e); }
+}
+
+// رفع حدث إلى Supabase: نحاول أولاً عبر RPC الآمن (بعد تطبيق migration دعم events)،
+// ثم نتراجع إلى الإدراج المباشر إن سمحت سياسات RLS.
+async function pushEventRecord(payload) {
+    try {
+        await pushDesktopRecord('events', payload.id, 'insert', payload);
+        return;
+    } catch (rpcError) {
+        const { error } = await supabaseClient.from('events').upsert(payload, { onConflict: 'id' });
+        if (error) throw rpcError;
+    }
+}
+
+async function pushDesktopRecord(entityType, entityId, operation, payload) {
+    const { data, error } = await supabaseClient.rpc('apply_mobile_operation', {
+        p_operation_id: newSyncOperationId(),
+        p_office_id: currentOfficeId,
+        p_entity_type: entityType,
+        p_entity_id: String(entityId),
+        p_operation: operation,
+        p_payload: payload,
+        p_base_updated_at: payload.updated_at || null
+    });
+    if (error) throw error;
+    if (data?.status === 'rejected') throw new Error(data.error || `رفضت مزامنة ${entityType}`);
+}
+
+// رفع كل البيانات الموجودة أصلًا في Dexie، وليس العمليات الجديدة فقط.
+// هذا هو مسار الترحيل الأولي المطلوب حتى تظهر بيانات المكتب على الهاتف.
+async function uploadAllLocalOfficeData() {
+    if (!(await ensureDesktopSupabaseSession())) {
+        throw new Error('تعذر تسجيل دخول مالك المكتب إلى Supabase');
+    }
+    const legalFiles = await db.legalFiles.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of legalFiles) {
+        const payload = { ...record, status: normalizeLegalFileStatus(record.status) };
+        const { error } = await supabaseClient.from('legal_files').upsert(payload, { onConflict: 'id' });
+        if (error) throw error;
+        if (payload.status !== record.status) await db.legalFiles.update(record.id, { status: payload.status });
+    }
+    const proceedings = await db.proceedings.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of proceedings) {
+        const { error } = await supabaseClient.from('proceedings').upsert(record, { onConflict: 'id' });
+        if (error) throw error;
+    }
+    const cases = await db.cases.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of cases) await pushDesktopRecord('cases', record.id, 'update', record);
+    const parties = await db.caseParties.where('office_id').equals(currentOfficeId).toArray();
+    for (const party of parties) { const { error } = await supabaseClient.from('case_parties').upsert(party, { onConflict: 'id' }); if (error) throw error; }
+    const sessionLogs = await db.sessionChangeLog.where('office_id').equals(currentOfficeId).toArray();
+    for (const log of sessionLogs) { const remoteId = log.remote_id || generateUUID(); const { id, ...logData } = log; const { error } = await supabaseClient.from('session_change_log').upsert({ ...logData, id: remoteId }, { onConflict: 'id' }); if (error) throw error; if (!log.remote_id) await db.sessionChangeLog.update(log.id, { remote_id: remoteId }); }
+
+    // لا نرفع العلاقات التابعة قبل التأكد من وجود القضية على الخادم؛
+    // هذا يمنع توقف المزامنة بسبب سجلات أتعاب/جلسات قديمة يتيمة محليًا.
+    const { data: remoteCases, error: remoteCasesError } = await supabaseClient
+        .from('cases').select('id').eq('office_id', currentOfficeId).limit(5000);
+    if (remoteCasesError) throw remoteCasesError;
+    const remoteCaseIds = new Set((remoteCases || []).map((row) => String(row.id)));
+    const skippedRelations = [];
+
+    const sessions = await db.sessions.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of sessions) {
+        if (!remoteCaseIds.has(String(record.case_id))) {
+            skippedRelations.push(`جلسة ${record.id}`);
+            continue;
+        }
+        await pushDesktopRecord('sessions', record.id, 'insert', record);
+    }
+
+    const tasks = await db.tasks.toArray();
+    for (const record of tasks) {
+        const remoteId = record.remote_id || generateUUID();
+        if (!record.remote_id) await db.tasks.update(record.id, { remote_id: remoteId });
+        await pushDesktopRecord('tasks', remoteId, 'insert', { ...record, id: undefined, remote_id: undefined });
+    }
+
+    // رفع أحداث الأجناد (events) إلى Supabase. لا يدعمها RPC القديم، لذلك نستخدم pushEventRecord
+    // الذي يجرّب المسار الآمن ثم يتراجع للإدراج المباشر. أي فشل هنا لا يوقف بقية المزامنة.
+    const calendarEvents = await db.events.toArray();
+    for (const record of calendarEvents) {
+        const remoteId = record.remote_id || generateUUID();
+        if (!record.remote_id) await db.events.update(record.id, { remote_id: remoteId });
+        const payload = { id: remoteId, office_id: currentOfficeId, title: record.title || '', date: record.date || null, type: record.type || 'other', created_at: record.created_at || new Date().toISOString() };
+        try { await pushEventRecord(payload); }
+        catch (e) { console.warn('تعذر رفع حدث الأجندة (يلزم تطبيق migration دعم events):', e?.message || e); }
+    }
+
+    const expenses = await db.expenses.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of expenses) {
+        const payload = { ...record, expense_date: record.expense_date || record.date };
+        if (payload.case_id && !remoteCaseIds.has(String(payload.case_id))) delete payload.case_id;
+        const remoteId = record.remote_id || generateUUID();
+        if (!record.remote_id) await db.expenses.update(record.id, { remote_id: remoteId });
+        await pushDesktopRecord('expenses', remoteId, 'insert', { ...payload, id: undefined, remote_id: undefined });
+    }
+
+    // رفع نسخة دفترية موحدة؛ يظل جدول expenses للتوافق مع الإصدارات القديمة.
+    const ledger = await db.financialTransactions.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of ledger) {
+        // لا نرسل السجل المحلي كاملاً؛ الإصدارات القديمة كانت تحتوي legacy_payment_id
+        // وهو غير موجود في المخطط الحالي، فيرفض PostgREST العملية قبل تنفيذها.
+        const ledgerPayload = {
+            id: record.id,
+            office_id: currentOfficeId,
+            transaction_type: record.transaction_type === 'expense' ? 'expense' : 'income',
+            transaction_scope: ['office', 'case', 'file'].includes(record.transaction_scope) ? record.transaction_scope : 'office',
+            case_id: record.case_id || null,
+            office_file_id: record.office_file_id || null,
+            amount: Number(record.amount) || 0,
+            transaction_date: record.transaction_date || record.date || new Date().toISOString().slice(0, 10),
+            category: record.category || (record.transaction_type === 'expense' ? 'مصروف' : 'دخل'),
+            description: record.description || null,
+            payment_method: record.payment_method || null,
+            paid_from: record.paid_from || null,
+            receipt_path: record.receipt_path || null,
+            created_at: record.created_at || new Date().toISOString(),
+            updated_at: record.updated_at || new Date().toISOString()
+        };
+        const { error } = await supabaseClient.from('financial_transactions').upsert(ledgerPayload, { onConflict: 'id' });
+        if (error) throw error;
+    }
+    const legacyPayments = await db.payments.toArray();
+    for (const payment of legacyPayments) {
+        // payment.id رقم محلي وليس UUID؛ نشتق منه UUID صالحًا وثابتًا، ولا نرسل أي حقل محلي إضافي إلى Supabase.
+        const numericId = Math.abs(Number(payment.id) || 0).toString(16).padStart(12, '0').slice(-12);
+        const legacyId = `00000000-0000-0000-0000-${numericId}`;
+        const legacyLedger = { id: legacyId, office_id: currentOfficeId, transaction_type: 'income', transaction_scope: 'case', case_id: payment.case_id, office_file_id: null, amount: payment.amount, transaction_date: payment.date, category: 'دفعة أتعاب', description: payment.note || '' };
+        const { error } = await supabaseClient.from('financial_transactions').upsert(legacyLedger, { onConflict: 'id' });
+        if (error) throw error;
+    }
+
+    const fees = await db.fees.toArray();
+    for (const record of fees) {
+        if (!remoteCaseIds.has(String(record.case_id))) {
+            skippedRelations.push(`أتعاب القضية ${record.case_id}`);
+            continue;
+        }
+        await pushDesktopRecord('fees', record.case_id, 'update', record);
+    }
+    if (skippedRelations.length) console.warn('تم تجاوز سجلات تابعة لقضايا غير موجودة:', skippedRelations);
+
+    const files = await db.officeFiles.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of files) {
+        const { error } = await supabaseClient.rpc('sync_office_file', { p_file: record });
+        if (error) throw error;
+    }
+
+    const events = await db.fileEvents.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of events) {
+        const { error } = await supabaseClient.rpc('sync_file_event', { p_event: record });
+        if (error) throw error;
+    }
+
+    const notes = await db.notes.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of notes) {
+        const { id, ...noteData } = record;
+        const { error } = await supabaseClient.from('notes').insert([noteData]);
+        if (error && error.code !== '23505') throw error;
+    }
+}
+
+window.syncWithSupabase = async function() {
+    if (!navigator.onLine) return Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'أنت غير متصل بالإنترنت', background: '#0f172a', color: '#fff' });
+    if (!supabaseClient) await initSupabase();
+    if (!supabaseClient) return Swal.fire('خطأ', 'لم يتم تهيئة اتصال Supabase', 'error');
+    await setSupabaseOfficeId(currentOfficeId);
+    Swal.fire({ title: 'جاري المزامنة...', allowOutsideClick: false, didOpen: () => Swal.showLoading(), background: '#0f172a', color: '#fff' });
+    try {
+        // أولًا نرفع قاعدة المكتب المحلية كاملة حتى لا يظهر الهاتف كمكتب فارغ.
+        await uploadAllLocalOfficeData();
+        await uploadToSupabase();
+        await downloadFromSupabase();
+        updatePendingBadge();
+        loadStats();
+        loadDashboardSummary();
+        loadCasesList();
+        loadUpcomingSessions('week');
+        renderCalendar();
+
+        if (activeCaseId && document.getElementById('feesModal')?.classList.contains('show')) {
+            await openFeesModal(activeCaseId);
+        }
+
+        if (activeCaseId) {
+            const updatedCase = await db.cases.get(activeCaseId);
+            if (updatedCase) {
+                const detailCodeSpan = document.querySelector('#caseDetailContent .text-warning.fw-bold + span');
+                if (detailCodeSpan) detailCodeSpan.innerText = updatedCase.case_code;
+                const modalCodeSpan = document.querySelector('#caseModal .border-warning');
+                if (modalCodeSpan) modalCodeSpan.innerText = updatedCase.case_code;
+            }
+        }
+        Swal.close();
+        const [syncedCases, syncedSessions, syncedTasks, syncedLedger] = await Promise.all([
+            db.cases.where('office_id').equals(currentOfficeId).count(),
+            db.sessions.where('office_id').equals(currentOfficeId).count(),
+            db.tasks.where('office_id').equals(currentOfficeId).count(),
+            db.financialTransactions.where('office_id').equals(currentOfficeId).count()
+        ]);
+        Swal.fire({ icon: 'success', title: 'تم', text: `تمت المزامنة — قضايا: ${syncedCases} · جلسات: ${syncedSessions} · مهام: ${syncedTasks} · حركات مالية: ${syncedLedger}`, background: '#0f172a', color: '#fff', showConfirmButton: false, timer: 3500 });
+    } catch (err) { console.error('فشلت المزامنة:', err); Swal.close(); Swal.fire({ icon: 'error', title: 'فشلت المزامنة', text: err?.message || 'حدث خطأ غير معروف أثناء رفع بيانات المكتب', background: '#0f172a', color: '#fff' }); }
+};
+
+
 let backgroundSyncInFlight = false;
 // حالة المزامنة الظاهرة للمالك: آخر نجاح، آخر خطأ، وعدد المحاولات المتتالية الفاشلة.
 let syncState = { lastSyncAt: null, lastError: null, consecutiveFailures: 0, backoffMs: 0 };
