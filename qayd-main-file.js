@@ -330,16 +330,6 @@
     host.innerHTML = html;
     document.body.appendChild(host);
 
-    // زر الدخول في تبويب القضايا
-    const grid = document.querySelector('.quick-actions-grid');
-    if (grid && !document.getElementById('qmfOpenBtn')) {
-      const btn = document.createElement('button');
-      btn.id = 'qmfOpenBtn';
-      btn.className = 'btn btn-outline-warning quick-action';
-      btn.innerHTML = '<i class="bi bi-folder2-open"></i> الملفات الرئيسية';
-      btn.onclick = () => window.QMF.openPanel();
-      grid.insertBefore(btn, grid.firstChild);
-    }
   }
 
   /* ============================================================
