@@ -17,3 +17,5 @@
 المشروع الحالي يحتوي على جداول `fees` و`payments` و`expenses` القديمة، كما يحتوي على جداول `stage_fees` و`stage_payments` و`stage_expenses` المرتبطة بنموذج `case_stages`. أما MJ فيستخدم `legal_files` و`proceedings`، ولذلك لا يرسل التطبيق حقول الربط الجديدة إلى الجداول القديمة حتى لا تفشل المزامنة بسبب أعمدة غير موجودة.
 
 لا تُطبق Migration تلقائياً. يلزم قرار منفصل لاعتماد جداول مالية مرتبطة بـ `legal_files` و`proceedings` أو إضافة أعمدة وعلاقات مناسبة إلى Supabase، ثم اختبار RLS والمزامنة قبل تفعيل الرفع الكامل لبيانات MJ المالية.
+
+تم إعداد مسودة `supabase_migration_mj_finance_proceedings.sql` لهذا الغرض. المسودة تضيف أعمدة `legal_file_id` و`proceeding_id` وفهارس وعلاقات وصلاحيات، وتحافظ على جداول `cases` القديمة. لم تُنفذ على مشروع Supabase.
