@@ -1457,7 +1457,7 @@ async function uploadAllLocalOfficeData() {
         if (!record.remote_id) await db.events.update(record.id, { remote_id: remoteId });
         const payload = { id: remoteId, office_id: currentOfficeId, title: record.title || '', date: record.date || null, type: record.type || 'other', created_at: record.created_at || new Date().toISOString() };
         try { await pushEventRecord(payload); }
-        catch (e) { console.warn('تعذر رفع حدث الأجندة (يلزم تطبيق migration دعم events):', e?.message || e); }
+        catch (e) { throw e; }
     }
 
     const expenses = await db.expenses.where('office_id').equals(currentOfficeId).toArray();
@@ -1494,12 +1494,26 @@ async function uploadAllLocalOfficeData() {
         const { error } = await supabaseClient.from('financial_transactions').upsert(ledgerPayload, { onConflict: 'id' });
         if (error) throw error;
     }
+    const caseStages = await db.caseStages.where('office_id').equals(currentOfficeId).toArray();
+    for (const record of caseStages) { const { error } = await supabaseClient.from('case_stages').upsert(record, { onConflict: 'id' }); if (error) throw error; }
     const stageFees = await db.stageFees.where('office_id').equals(currentOfficeId).toArray();
     for (const record of stageFees) { const { error } = await supabaseClient.from('stage_fees').upsert(record, { onConflict: 'stage_id' }); if (error) throw error; }
     const stagePayments = await db.stagePayments.where('office_id').equals(currentOfficeId).toArray();
-    for (const record of stagePayments) { const { id, remote_id, ...data } = record; const { error } = await supabaseClient.from('stage_payments').upsert({ ...data, id: remote_id || generateUUID(), office_id: currentOfficeId }, { onConflict: 'id' }); if (error) throw error; }
+    for (const record of stagePayments) {
+        const remoteId = record.remote_id || generateUUID();
+        const { id, remote_id, ...data } = record;
+        const { error } = await supabaseClient.from('stage_payments').upsert({ ...data, id: remoteId, office_id: currentOfficeId }, { onConflict: 'id' });
+        if (error) throw error;
+        if (!record.remote_id) await db.stagePayments.update(record.id, { remote_id: remoteId });
+    }
     const stageExpenses = await db.stageExpenses.where('office_id').equals(currentOfficeId).toArray();
-    for (const record of stageExpenses) { const { id, remote_id, owner_id, date, ...data } = record; const { error } = await supabaseClient.from('stage_expenses').upsert({ ...data, id: remote_id || generateUUID(), office_id: currentOfficeId, expense_date: record.expense_date || date }, { onConflict: 'id' }); if (error) throw error; }
+    for (const record of stageExpenses) {
+        const remoteId = record.remote_id || generateUUID();
+        const { id, remote_id, owner_id, date, ...data } = record;
+        const { error } = await supabaseClient.from('stage_expenses').upsert({ ...data, id: remoteId, office_id: currentOfficeId, expense_date: record.expense_date || date }, { onConflict: 'id' });
+        if (error) throw error;
+        if (!record.remote_id) await db.stageExpenses.update(record.id, { remote_id: remoteId });
+    }
     const legacyPayments = await db.payments.toArray();
     for (const payment of legacyPayments) {
         // payment.id رقم محلي وليس UUID؛ نشتق منه UUID صالحًا وثابتًا، ولا نرسل أي حقل محلي إضافي إلى Supabase.
@@ -1748,6 +1762,9 @@ async function uploadToSupabase() {
             } else if (op.operation === 'update_office_file') {
                 const { error } = await supabaseClient.rpc('sync_office_file', { p_file: op.data });
                 if (error) throw error;
+            } else if (op.operation === 'delete_office_file') {
+                const { error } = await supabaseClient.from('office_files').delete().eq('id', op.data.id).eq('office_id', currentOfficeId);
+                if (error) throw error;
             } else if (op.operation === 'insert_file_event') {
                 const { error } = await supabaseClient.rpc('sync_file_event', { p_event: op.data });
                 if (error) throw error;
@@ -1773,7 +1790,7 @@ async function uploadToSupabase() {
 
 async function downloadFromSupabase() {
     const { data: cases, error: casesError } = await supabaseClient.from('cases').select('*').eq('office_id', currentOfficeId);
-    if (casesError) console.error('خطأ في تحميل القضايا:', casesError);
+    if (casesError) throw casesError;
     if (cases && cases.length > 0) {
         for (let c of cases) {
             const existing = await db.cases.get(c.id);
@@ -1783,7 +1800,7 @@ async function downloadFromSupabase() {
     }
     // تنزيل الملفات المهنية عبر RPC آمن لأن القراءة المباشرة للجدول مغلقة.
     const { data: professionalFiles, error: professionalFilesError } = await supabaseClient.rpc('get_office_files_for_sync', { p_office_id: currentOfficeId });
-    if (professionalFilesError) console.error('خطأ في تحميل الملفات المهنية:', professionalFilesError);
+    if (professionalFilesError) throw professionalFilesError;
     if (professionalFiles && professionalFiles.length > 0) {
         for (let f of professionalFiles) {
             const existing = await db.officeFiles.get(f.id);
@@ -1792,7 +1809,7 @@ async function downloadFromSupabase() {
         }
     }
     const { data: professionalEvents, error: professionalEventsError } = await supabaseClient.rpc('get_file_events_for_sync', { p_office_id: currentOfficeId });
-    if (professionalEventsError) console.error('خطأ في تحميل مراحل الملفات المهنية:', professionalEventsError);
+    if (professionalEventsError) throw professionalEventsError;
     if (professionalEvents && professionalEvents.length > 0) {
         for (let e of professionalEvents) {
             const existing = await db.fileEvents.get(e.id);
@@ -1802,10 +1819,10 @@ async function downloadFromSupabase() {
     }
 
     const { data: remoteStages, error: stagesError } = await supabaseClient.from('case_stages').select('*').eq('office_id', currentOfficeId).limit(5000);
-    if (stagesError) console.error('خطأ في تحميل مراحل القضايا:', stagesError);
+    if (stagesError) throw stagesError;
     for (const stage of remoteStages || []) await db.caseStages.put(stage);
     const { data: sessions, error: sessionsError } = await supabaseClient.from('sessions').select('*').eq('office_id', currentOfficeId);
-    if (sessionsError) console.error('خطأ في تحميل الجلسات:', sessionsError);
+    if (sessionsError) throw sessionsError;
     if (sessions && sessions.length > 0) {
         for (let s of sessions) {
             const existing = await db.sessions.get(s.id);
@@ -1814,15 +1831,15 @@ async function downloadFromSupabase() {
         }
     }
     const { data: remoteParties, error: partiesError } = await supabaseClient.from('case_parties').select('*').eq('office_id', currentOfficeId).limit(5000);
-    if (partiesError) console.error('خطأ في تحميل العملاء والخصوم:', partiesError);
+    if (partiesError) throw partiesError;
     for (const party of remoteParties || []) await db.caseParties.put(party);
     const { data: remoteSessionLogs, error: sessionLogsError } = await supabaseClient.from('session_change_log').select('*').eq('office_id', currentOfficeId).limit(5000);
-    if (sessionLogsError) console.error('خطأ في تحميل سجل تغييرات الجلسات:', sessionLogsError);
+    if (sessionLogsError) throw sessionLogsError;
     for (const log of remoteSessionLogs || []) { const existing = await db.sessionChangeLog.where('remote_id').equals(log.id).first(); const local = { ...log, remote_id: log.id, id: existing?.id }; if (existing) await db.sessionChangeLog.update(existing.id, local); else { delete local.id; await db.sessionChangeLog.add(local); } }
 
     // الجداول التالية تُنزّل أيضًا حتى تظهر حركات الهاتف داخل سطح المكتب.
     const { data: remoteTasks, error: tasksError } = await supabaseClient.from('tasks').select('*').eq('office_id', currentOfficeId).limit(5000);
-    if (tasksError) console.error('خطأ في تحميل المهام:', tasksError);
+    if (tasksError) throw tasksError;
     for (const task of remoteTasks || []) {
         const existing = await db.tasks.where('remote_id').equals(String(task.id)).first();
         const local = { ...task, remote_id: String(task.id), id: existing?.id };
@@ -1832,7 +1849,7 @@ async function downloadFromSupabase() {
 
     // تنزيل أحداث الأجناد (events) حتى تظهر أحداث الهاتف داخل تقويم سطح المكتب.
     const { data: remoteEvents, error: remoteEventsError } = await supabaseClient.from('events').select('*').eq('office_id', currentOfficeId).limit(5000);
-    if (remoteEventsError) console.error('خطأ في تحميل أحداث الأجندة:', remoteEventsError);
+    if (remoteEventsError) throw remoteEventsError;
     for (const ev of remoteEvents || []) {
         const existing = await db.events.where('remote_id').equals(String(ev.id)).first();
         const local = { ...ev, remote_id: String(ev.id), id: existing?.id };
@@ -1841,7 +1858,7 @@ async function downloadFromSupabase() {
     }
 
     const { data: remoteExpenses, error: expensesError } = await supabaseClient.from('expenses').select('*').eq('office_id', currentOfficeId).limit(5000);
-    if (expensesError) console.error('خطأ في تحميل المصروفات:', expensesError);
+    if (expensesError) throw expensesError;
     for (const expense of remoteExpenses || []) {
         const existing = await db.expenses.where('remote_id').equals(String(expense.id)).first();
         const local = { ...expense, remote_id: String(expense.id), id: existing?.id, date: expense.date || expense.expense_date };
@@ -1850,7 +1867,7 @@ async function downloadFromSupabase() {
     }
 
     const { data: remoteFees, error: feesError } = await supabaseClient.from('fees').select('*').limit(5000);
-    if (feesError) console.error('خطأ في تحميل الأتعاب:', feesError);
+    if (feesError) throw feesError;
     for (const fee of remoteFees || []) {
         const caseRow = await db.cases.get(fee.case_id);
         if (caseRow?.office_id !== currentOfficeId) continue;
@@ -1860,7 +1877,7 @@ async function downloadFromSupabase() {
     }
 
     const { data: remotePayments, error: paymentsError } = await supabaseClient.from('payments').select('*').limit(5000);
-    if (paymentsError) console.error('خطأ في تحميل المدفوعات:', paymentsError);
+    if (paymentsError) throw paymentsError;
     for (const payment of remotePayments || []) {
         const caseRow = await db.cases.get(payment.case_id);
         if (caseRow?.office_id !== currentOfficeId) continue;
@@ -1871,16 +1888,16 @@ async function downloadFromSupabase() {
     }
 
     const { data: remoteStageFees, error: stageFeesError } = await supabaseClient.from('stage_fees').select('*').eq('office_id', currentOfficeId).limit(5000);
-    if (stageFeesError) console.error('خطأ في تحميل أتعاب المراحل:', stageFeesError);
+    if (stageFeesError) throw stageFeesError;
     for (const row of remoteStageFees || []) await db.stageFees.put(row);
     const { data: remoteStagePayments, error: stagePaymentsError } = await supabaseClient.from('stage_payments').select('*').eq('office_id', currentOfficeId).limit(5000);
-    if (stagePaymentsError) console.error('خطأ في تحميل مدفوعات المراحل:', stagePaymentsError);
+    if (stagePaymentsError) throw stagePaymentsError;
     for (const row of remoteStagePayments || []) { const existing = await db.stagePayments.where('remote_id').equals(String(row.id)).first(); const local = { ...row, remote_id: String(row.id), id: existing?.id, date: row.date }; if (existing) await db.stagePayments.update(existing.id, local); else { delete local.id; await db.stagePayments.add(local); } }
     const { data: remoteStageExpenses, error: stageExpensesError } = await supabaseClient.from('stage_expenses').select('*').eq('office_id', currentOfficeId).limit(5000);
-    if (stageExpensesError) console.error('خطأ في تحميل مصروفات المراحل:', stageExpensesError);
+    if (stageExpensesError) throw stageExpensesError;
     for (const row of remoteStageExpenses || []) { const existing = await db.stageExpenses.where('remote_id').equals(String(row.id)).first(); const local = { ...row, remote_id: String(row.id), id: existing?.id, date: row.date || row.expense_date }; if (existing) await db.stageExpenses.update(existing.id, local); else { delete local.id; await db.stageExpenses.add(local); } }
     const { data: remoteLedger, error: ledgerError } = await supabaseClient.from('financial_transactions').select('*').eq('office_id', currentOfficeId).limit(5000);
-    if (ledgerError) console.error('خطأ في تحميل دفتر المالية:', ledgerError);
+    if (ledgerError) throw ledgerError;
     for (const record of remoteLedger || []) {
         const existing = await db.financialTransactions.get(record.id);
         if (existing) await db.financialTransactions.update(record.id, record);
@@ -1889,12 +1906,12 @@ async function downloadFromSupabase() {
 
     for (const [tableName, table] of [['legal_files', db.legalFiles], ['proceedings', db.proceedings], ['service_actions', db.serviceActions], ['approval_requests', db.approvalRequests]]) {
         const { data, error } = await supabaseClient.from(tableName).select('*').eq('office_id', currentOfficeId).limit(5000);
-        if (error) { console.error(`خطأ في تحميل ${tableName}:`, error); continue; }
+        if (error) throw error;
         for (const row of data || []) await table.put(tableName === 'legal_files' ? { ...row, status: normalizeLegalFileStatus(row.status) } : row);
     }
 
     const { data: remoteNotes, error: notesError } = await supabaseClient.from('notes').select('id, office_id, case_id, office_file_id, content, author_user_id, created_at, updated_at').eq('office_id', currentOfficeId).order('updated_at', { ascending: false }).limit(5000);
-    if (notesError) console.error('خطأ في تحميل ملاحظات الفريق:', notesError);
+    if (notesError) throw notesError;
     for (const note of remoteNotes || []) {
         const existing = await db.notes.get(note.id);
         if (existing) await db.notes.update(note.id, note);
