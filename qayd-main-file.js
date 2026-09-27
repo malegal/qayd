@@ -415,9 +415,11 @@
   /* ============================================================
    * 8) إنشاء ملف رئيسي
    * ============================================================ */
+  let _editingMainFileId = null;
   function openCreateModal() {
     const { ownerOnly } = G();
     if (typeof ownerOnly === 'function' && !ownerOnly('إنشاء ملف رئيسي')) return;
+    _editingMainFileId = null;
     ['qmf_title', 'qmf_client_name', 'qmf_client_phone', 'qmf_client_role', 'qmf_client_nid', 'qmf_client_addr',
       'qmf_opp_name', 'qmf_opp_role', 'qmf_opp_phone', 'qmf_desc', 'qmf_stage_court', 'qmf_stage_circuit',
       'qmf_stage_number', 'qmf_stage_year', 'qmf_stage_city', 'qmf_stage_type', 'qmf_stage_subject',
@@ -425,9 +427,121 @@
       'qmf_fee_total', 'qmf_fee_paid', 'qmf_fee_notes'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     const t = document.getElementById('qmf_file_type'); if (t) t.value = 'judicial';
     const sk = document.getElementById('qmf_stage_kind'); if (sk) sk.value = 'registration';
+    const ft = document.querySelector('#qmfCreateModal .modal-title'); if (ft) ft.innerHTML = '<i class="bi bi-folder-plus"></i> إنشاء ملف رئيسي';
     onTypeChange();
     const { showModal } = G();
     if (typeof showModal === 'function') showModal('qmfCreateModal');
+  }
+
+  // تعديل بيانات الملف الرئيسي (العنوان/العميل/الخصم/النوع/الوصف) دون المساس بالمراحل.
+  async function editMainFile(legalFileId) {
+    const { db, showModal, hideModal } = G();
+    const file = await db.legalFiles.get(legalFileId);
+    if (!file) return;
+    _editingMainFileId = legalFileId;
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v == null ? '' : v; };
+    set('qmf_file_type', file.file_type || 'judicial');
+    set('qmf_title', file.title || '');
+    set('qmf_client_name', file.client_name || '');
+    set('qmf_client_phone', file.client_phone || '');
+    set('qmf_client_role', file.client_role || '');
+    set('qmf_client_nid', file.client_national_id || '');
+    set('qmf_client_addr', file.client_address || '');
+    set('qmf_opp_name', file.opponent_name || '');
+    set('qmf_opp_role', file.opponent_role || '');
+    set('qmf_opp_phone', file.opponent_phone || '');
+    set('qmf_desc', file.description || '');
+    // إخفاء أقسام المرحلة والأتعاب عند تعديل بيانات الملف فقط.
+    const js = document.getElementById('qmf_judicial_section'); if (js) js.style.display = 'none';
+    const ss = document.getElementById('qmf_service_section'); if (ss) ss.style.display = 'none';
+    const ft = document.querySelector('#qmfCreateModal .modal-title'); if (ft) ft.innerHTML = '<i class="bi bi-pencil"></i> تعديل الملف الرئيسي';
+    if (typeof hideModal === 'function') hideModal('qmfDetailsModal');
+    if (typeof showModal === 'function') showModal('qmfCreateModal');
+  }
+
+  // أرشفة الملف الرئيسي.
+  async function archiveMainFile(legalFileId) {
+    const { db, Swal, hideModal } = G();
+    const file = await db.legalFiles.get(legalFileId);
+    if (!file) return;
+    if (Swal) {
+      const res = await Swal.fire({ title: 'أرشفة الملف؟', text: file.title || file.file_code, icon: 'warning', showCancelButton: true, confirmButtonText: 'أرشفة', cancelButtonText: 'إلغاء', background: '#0f172a', color: '#fff' });
+      if (!res.isConfirmed) return;
+    }
+    const now = nowIso();
+    await db.legalFiles.update(legalFileId, { status: 'archived', archived: 1, updated_at: now });
+    await db.pendingOperations.add({ operation: 'upsert_legal_file', data: { ...file, status: 'archived', archived: 1, updated_at: now }, timestamp: Date.now() });
+    if (typeof hideModal === 'function') hideModal('qmfDetailsModal');
+    if (Swal) Swal.fire({ icon: 'success', title: 'تمت الأرشفة', timer: 1500, showConfirmButton: false, background: '#0f172a', color: '#fff' });
+    await renderList('');
+    if (typeof window.loadCasesList === 'function') { try { await window.loadCasesList(); } catch (e) {} }
+  }
+
+  // حذف الملف الرئيسي وكل مراحله وجلساته نهائيًا.
+  async function deleteMainFile(legalFileId) {
+    const { db, Swal, hideModal, esc } = G();
+    const file = await db.legalFiles.get(legalFileId);
+    if (!file) return;
+    if (Swal) {
+      const res = await Swal.fire({ title: 'حذف الملف نهائيًا؟', html: `سيتم حذف الملف <b>${esc(file.file_code)}</b> وكل مراحله وجلساته من الجهاز.`, icon: 'warning', showCancelButton: true, confirmButtonText: 'حذف نهائي', cancelButtonText: 'إلغاء', confirmButtonColor: '#b43b45', background: '#0f172a', color: '#fff' });
+      if (!res.isConfirmed) return;
+    }
+    try {
+      const stages = await db.cases.filter(c => c.legal_file_id === legalFileId).toArray();
+      for (const s of stages) {
+        await db.sessions.where('case_id').equals(s.id).delete();
+        await db.fees.delete(s.id);
+        await db.payments.where('case_id').equals(s.id).delete();
+        await db.expenses.where('case_id').equals(s.id).delete();
+        await db.cases.delete(s.id);
+      }
+    } catch (e) { console.warn('[QMF] delete stages', e); }
+    try { const rows = await db.proceedings.filter(p => p.legal_file_id === legalFileId).toArray(); for (const r of rows) await db.proceedings.delete(r.id); } catch (e) {}
+    try { const rows = await db.serviceActions.filter(a => a.legal_file_id === legalFileId).toArray(); for (const r of rows) await db.serviceActions.delete(r.id); } catch (e) {}
+    await db.fees.delete(legalFileId);
+    await db.payments.where('case_id').equals(legalFileId).delete();
+    await db.expenses.where('case_id').equals(legalFileId).delete();
+    await db.legalFiles.delete(legalFileId);
+    await db.pendingOperations.add({ operation: 'delete_legal_file', data: { id: legalFileId }, timestamp: Date.now() });
+    if (typeof hideModal === 'function') hideModal('qmfDetailsModal');
+    if (Swal) Swal.fire({ icon: 'success', title: 'تم الحذف', timer: 1500, showConfirmButton: false, background: '#0f172a', color: '#fff' });
+    await renderList('');
+    if (typeof window.loadCasesList === 'function') { try { await window.loadCasesList(); } catch (e) {} }
+  }
+
+  // إضافة جلسة للملف الرئيسي: تفتح نموذج الجلسات مع اختيار المرحلة الحالية تلقائيًا.
+  async function addSessionForFile(legalFileId) {
+    const { Swal, hideModal } = G();
+    let stages = await loadStagesForFile(legalFileId);
+    if (!stages.length) { if (Swal) Swal.fire('تنبيه', 'أضف مرحلة أولاً قبل تسجيل جلسة.', 'info'); return; }
+    stages.sort((a, b) => (STAGE_KINDS[b.stage_kind] ? STAGE_KINDS[b.stage_kind].order : 0) - (STAGE_KINDS[a.stage_kind] ? STAGE_KINDS[a.stage_kind].order : 0));
+    const current = stages[0];
+    if (typeof hideModal === 'function') hideModal('qmfDetailsModal');
+    setTimeout(() => {
+      if (typeof window.openSessionsModal === 'function') window.openSessionsModal();
+      setTimeout(() => {
+        if (typeof window.selectCaseForSession === 'function') window.selectCaseForSession(current.id);
+        const d = document.getElementById('s_date'); if (d) d.focus();
+      }, 300);
+    }, 250);
+  }
+
+  // ترحيل جلسة من جلسات الملف الرئيسي.
+  async function rescheduleFileSession(legalFileId) {
+    const { db, Swal, hideModal } = G();
+    let stages = await loadStagesForFile(legalFileId);
+    let sessions = [];
+    for (const s of stages) { try { const rows = await db.sessions.where('case_id').equals(s.id).toArray(); sessions.push(...rows); } catch (e) {} }
+    sessions = sessions.filter(s => s.session_date).sort((a, b) => String(a.session_date).localeCompare(String(b.session_date)));
+    if (!sessions.length) { if (Swal) Swal.fire('تنبيه', 'لا توجد جلسات مسجلة لهذا الملف لترحيلها. استخدم «إضافة جلسة» أولاً.', 'info'); return; }
+    if (Swal) {
+      const options = {};
+      sessions.forEach(s => { options[s.id] = `${String(s.session_date).replace('T', ' ')} — ${s.case_status || ''}`; });
+      const res = await Swal.fire({ title: 'اختر الجلسة المراد ترحيلها', input: 'select', inputOptions: options, showCancelButton: true, confirmButtonText: 'ترحيل', cancelButtonText: 'إلغاء', background: '#0f172a', color: '#fff' });
+      if (!res.isConfirmed || !res.value) return;
+      if (typeof hideModal === 'function') hideModal('qmfDetailsModal');
+      setTimeout(() => { if (typeof window.openRescheduleModal === 'function') window.openRescheduleModal(res.value); }, 250);
+    }
   }
 
   function onTypeChange() {
@@ -458,6 +572,42 @@
       const title = document.getElementById('qmf_title').value.trim();
       const clientName = document.getElementById('qmf_client_name').value.trim();
       if (!title || !clientName) throw new Error('أدخل عنوان الملف واسم العميل');
+
+      // وضع التعديل: تحديث بيانات الملف الرئيسي القائم دون إنشاء ملف جديد.
+      if (_editingMainFileId) {
+        const existing = await db.legalFiles.get(_editingMainFileId);
+        if (existing) {
+          const nowEdit = nowIso();
+          const updates = {
+            file_type: fileType, file_category: categoryOf(fileType), title,
+            client_name: clientName,
+            client_phone: document.getElementById('qmf_client_phone').value.trim(),
+            client_role: document.getElementById('qmf_client_role').value.trim(),
+            client_national_id: document.getElementById('qmf_client_nid').value.trim(),
+            client_address: document.getElementById('qmf_client_addr').value.trim(),
+            opponent_name: document.getElementById('qmf_opp_name').value.trim(),
+            opponent_role: document.getElementById('qmf_opp_role').value.trim(),
+            opponent_phone: document.getElementById('qmf_opp_phone').value.trim(),
+            description: document.getElementById('qmf_desc').value.trim(),
+            updated_at: nowEdit
+          };
+          await db.legalFiles.update(existing.id, updates);
+          await db.pendingOperations.add({ operation: 'upsert_legal_file', data: { ...existing, ...updates }, timestamp: Date.now() });
+          // مزامنة اسم العميل/الخصم مع المراحل المرتبطة.
+          try {
+            const stages = await db.cases.filter(c => c.legal_file_id === existing.id).toArray();
+            for (const s of stages) await db.cases.update(s.id, { client_name: clientName, opponent_name: updates.opponent_name, updated_at: nowEdit });
+          } catch (e) {}
+          _editingMainFileId = null;
+          if (typeof hideModal === 'function') hideModal('qmfCreateModal');
+          if (Swal) Swal.fire({ icon: 'success', title: 'تم حفظ التعديلات', timer: 1600, showConfirmButton: false, background: '#0f172a', color: '#fff' });
+          await renderList('');
+          if (typeof window.loadCasesList === 'function') { try { await window.loadCasesList(); } catch (e) {} }
+          setTimeout(() => openDetails(existing.id), 250);
+          return;
+        }
+        _editingMainFileId = null;
+      }
 
       const category = categoryOf(fileType);
       const code = assertValidMainFileCode(await generateMainFileCode());
@@ -674,9 +824,14 @@
         </div>
         <div class="qmf-actions">
           ${cat === 'judicial' ? `<button class="btn btn-sm gold-btn" onclick="QMF.openAddStage('${file.id}')"><i class="bi bi-plus-lg"></i> إضافة مرحلة</button>` : `<button class="btn btn-sm gold-btn" onclick="QMF.convertToJudicial('${file.id}')"><i class="bi bi-arrow-repeat"></i> تحويل إلى ملف قضائي</button>`}
+          <button class="btn btn-sm btn-outline-success" onclick="QMF.addSessionForFile('${file.id}')"><i class="bi bi-calendar-plus"></i> إضافة جلسة</button>
+          <button class="btn btn-sm btn-outline-warning" onclick="QMF.rescheduleFileSession('${file.id}')"><i class="bi bi-calendar-event"></i> ترحيل جلسة</button>
           <button class="btn btn-sm btn-success" onclick="QMF.openFileFees('${file.id}')"><i class="bi bi-cash-stack"></i> إدارة أتعاب الملف</button>
           <button class="btn btn-sm btn-outline-success" onclick="QMF.printFees('${file.id}')"><i class="bi bi-printer"></i> طباعة أتعاب الملف كله</button>
           <button class="btn btn-sm btn-outline-primary" onclick="QMF.printData('${file.id}')"><i class="bi bi-file-earmark-text"></i> طباعة بيانات الملف كله</button>
+          <button class="btn btn-sm btn-outline-warning" onclick="QMF.editMainFile('${file.id}')"><i class="bi bi-pencil"></i> تعديل</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="QMF.archiveMainFile('${file.id}')"><i class="bi bi-archive"></i> أرشفة</button>
+          <button class="btn btn-sm btn-outline-danger" onclick="QMF.deleteMainFile('${file.id}')"><i class="bi bi-trash"></i> حذف</button>
         </div>
       </div>
 
@@ -1059,6 +1214,11 @@
       renderList,
       openCreateModal,
       saveMainFile,
+      editMainFile,
+      archiveMainFile,
+      deleteMainFile,
+      addSessionForFile,
+      rescheduleFileSession,
       openDetails,
       openAddStage,
       saveStage,
