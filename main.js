@@ -184,6 +184,51 @@ ipcMain.handle('create-professional-file-folder', async (event, fileCode, client
     } catch (err) { return { success: false, error: err.message }; }
 });
 
+// حماية مجلدات «الملف الرئيسي» (MJ): مجلد واحد للملف ككل، وداخله مجلد فرعي لكل مرحلة
+// (مذكرات / مستندات / أتعاب). لا يُنشأ المجلد إلا بكود MJ صالح صادر من التطبيق.
+ipcMain.handle('create-main-file-folder', async (event, mainFileCode, clientName, mainFileData) => {
+    try {
+        if (typeof mainFileCode !== 'string' || !/^MJ-[0-9]{2}-[0-9]{5}-[A-Z0-9]{4}$/.test(mainFileCode.trim())) {
+            return { success: false, error: 'لا يمكن إنشاء مجلد ملف رئيسي بدون كود MJ صالح' };
+        }
+        if (!mainFileData || mainFileData.file_code !== mainFileCode.trim()) {
+            return { success: false, error: 'بيانات الملف لا تطابق كود الملف الرئيسي' };
+        }
+        const docsPath = app.getPath('documents');
+        const baseDir = path.join(docsPath, 'مكتب المحامي', 'الملفات الرئيسية');
+        const folderName = `${mainFileCode.trim()} - ${clientName || 'عميل'}`.replace(/[<>:"/\\|?*]/g, '_');
+        const folderPath = path.join(baseDir, folderName);
+        fs.mkdirSync(folderPath, { recursive: true });
+
+        // مجلدات المراحل: كل مرحلة لها مجلد مستقل يحوي مذكرات/مستندات/أتعاب.
+        const stages = Array.isArray(mainFileData.stages) ? mainFileData.stages : [];
+        for (const stage of stages) {
+            const label = (stage && stage.label) ? String(stage.label) : 'مرحلة';
+            const stageDir = path.join(folderPath, label.replace(/[<>:"/\\|?*]/g, '_'));
+            fs.mkdirSync(path.join(stageDir, 'مذكرات'), { recursive: true });
+            fs.mkdirSync(path.join(stageDir, 'مستندات'), { recursive: true });
+            fs.mkdirSync(path.join(stageDir, 'أتعاب'), { recursive: true });
+        }
+        // مجلد عام للبيانات والوثائق المشتركة على مستوى الملف كله.
+        fs.mkdirSync(path.join(folderPath, 'مستندات عامة'), { recursive: true });
+        fs.writeFileSync(path.join(folderPath, 'بيانات_الملف.json'), JSON.stringify(mainFileData, null, 2));
+        fs.writeFileSync(path.join(folderPath, 'الأتعاب.csv'), 'المرحلة,المبلغ,المدفوع,المتبقي,ملاحظات\n');
+        return { success: true, path: folderPath };
+    } catch (err) { return { success: false, error: err.message }; }
+});
+
+ipcMain.handle('open-main-file-folder', async (event, mainFileCode, clientName) => {
+    try {
+        if (typeof mainFileCode !== 'string' || !/^MJ-[0-9]{2}-[0-9]{5}-[A-Z0-9]{4}$/.test(mainFileCode.trim())) {
+            return { success: false, error: 'كود غير صالح' };
+        }
+        const folderPath = path.join(app.getPath('documents'), 'مكتب المحامي', 'الملفات الرئيسية', `${mainFileCode.trim()} - ${clientName || 'عميل'}`.replace(/[<>:"/\\|?*]/g, '_'));
+        if (!fs.existsSync(folderPath)) return { success: false, error: 'المجلد غير موجود' };
+        await shell.openPath(folderPath);
+        return { success: true };
+    } catch (err) { return { success: false, error: err.message }; }
+});
+
 ipcMain.handle('open-professional-file-folder', async (event, fileCode, clientName, fileType) => {
     try {
         if (typeof fileCode !== 'string' || !/^(RE|CT|CO|PI|DR|DC|GR|PR|AD)-[0-9]{2}-[0-9]{6}-[A-Z0-9]{6}$/.test(fileCode.trim())) return { success: false, error: 'كود غير صالح' };
