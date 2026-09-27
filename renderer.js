@@ -643,6 +643,7 @@ window.loadCasesList = async function() {
             ...allCasesList.map(c => ({ ...c, record_type: 'judicial' })),
             ...professionalFiles.map(f => ({ ...f, record_type: f.file_type }))
         ];
+        fmRefreshDynamicCourtFilter();
         await fmComputeMetrics();
         filterCasesList();
     } catch (error) {
@@ -651,6 +652,19 @@ window.loadCasesList = async function() {
         if (container) container.innerHTML = `<div class="alert alert-danger">تعذر تحميل الملفات: ${escapeHtml(error.message || 'خطأ غير معروف')}</div>`;
     }
 };
+function fmRefreshDynamicCourtFilter() {
+    var select = document.getElementById('courtFilter');
+    if (!select) return;
+    var current = select.value || '';
+    var courts = allOfficeRecords.map(function (r) { return String(r.court_name || '').trim(); })
+        .filter(Boolean).filter(function (v, i, a) { return a.indexOf(v) === i; })
+        .sort(function (a, b) { return a.localeCompare(b, 'ar'); });
+    select.innerHTML = '<option value="">كل المحاكم</option>' + courts.map(function (court) {
+        return '<option value="' + escapeHtml(court) + '">' + escapeHtml(court) + '</option>';
+    }).join('');
+    if (courts.indexOf(current) !== -1) select.value = current;
+}
+
 /* =========================================================================
  * FMPro — ترقية قسم إدارة الملفات
  *   2. عرض جدولي/بطاقات + فرز بالنقر على الأعمدة
@@ -784,7 +798,7 @@ function fmApplyFilters(records) {
     var f = fmState.filters;
     return records.filter(function (record) {
         if (search && fmRecordHaystack(record).indexOf(search) === -1) return false;
-        if (f.court && record.court_name !== f.court) return false;
+        if (f.court && String(record.court_name || '').trim() !== String(f.court).trim()) return false;
         if (f.category && fmRecordCategory(record) !== f.category) return false;
         if (f.type) {
             var matchType = record.record_type === f.type ||
@@ -1534,6 +1548,20 @@ window.saveSession = async function() {
     ['s_decision','s_required_action','s_responsible','s_followup'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     loadUpcomingSessions('week'); renderCalendar(); updatePendingBadge();
 };
+window.openAgendaSessionCase = async function(sessionId) {
+    try {
+        const session = await db.sessions.get(sessionId);
+        if (!session) return;
+        const c = await db.cases.get(session.case_id);
+        if (c) {
+            if (c.legal_file_id && window.QMF?.openDetails) return window.QMF.openDetails(c.legal_file_id);
+            return window.openCaseDetails(c.id);
+        }
+        if (session.legal_file_id && window.QMF?.openDetails) return window.QMF.openDetails(session.legal_file_id);
+        Swal.fire('تنبيه', 'لم يعد الملف المرتبط بهذه الجلسة موجودًا.', 'info');
+    } catch (error) { console.error('فتح ملف جلسة الأجندة:', error); }
+};
+
 window.loadUpcomingSessions = async function(range, btn) {
     const host = document.getElementById('upcomingSessionsList');
     if (!host) return; // أُزيل قسم جلسات الأسبوع/الشهر من نموذج الجلسات
@@ -1547,7 +1575,7 @@ window.loadUpcomingSessions = async function(range, btn) {
         let html = '';
         for (let s of sessions) {
             const c = await db.cases.get(s.case_id);
-            if (c) html += `<div class="session-card" onclick="openCaseDetails('${c.id}')"><div class="d-flex justify-content-between"><span class="gold-text">${new Date(s.session_date).toLocaleString('ar-EG', { dateStyle: 'full', timeStyle: 'short' })}</span><span class="case-status status-new">${s.case_status}</span></div><div class="mt-2"><strong>${c.client_name || 'عميل غير مسجل'}</strong> - ${c.case_number || 'رقم غير مسجل'}${c.case_year ? '/' + c.case_year : ''}</div><div class="mt-1 text-white-50">${c.court_name || 'محكمة غير مسجلة'} · ${c.circuit || 'دائرة غير مسجلة'}</div><div class="mt-1 text-white">${s.decision || ''}</div></div>`;
+            if (c) html += `<div class="session-card" onclick="openAgendaSessionCase('${s.id}')"><div class="d-flex justify-content-between"><span class="gold-text">${new Date(s.session_date).toLocaleString('ar-EG', { dateStyle: 'full', timeStyle: 'short' })}</span><span class="case-status status-new">${s.case_status}</span></div><div class="mt-2"><strong>${c.client_name || 'عميل غير مسجل'}</strong> - ${c.case_number || 'رقم غير مسجل'}${c.case_year ? '/' + c.case_year : ''}</div><div class="mt-1 text-white-50">${c.court_name || 'محكمة غير مسجلة'} · ${c.circuit || 'دائرة غير مسجلة'}</div><div class="mt-1 text-white">${s.decision || ''}</div></div>`;
         }
         document.getElementById('upcomingSessionsList').innerHTML = html || '<div class="text-muted">لا توجد جلسات في هذه الفترة</div>';
     } catch (e) { }
@@ -1613,7 +1641,7 @@ window.renderCalendar = async function() {
         }
         document.getElementById('calendarDays').innerHTML = html;
         const monthList = document.getElementById('agendaMonthCases');
-        if (monthList) { const caseMap = new Map((await db.cases.toArray()).map(c => [String(c.id), c])); const monthRows = sessions.filter(s => s.session_date && s.session_date.startsWith(monthStr)).sort((a,b) => String(a.session_date).localeCompare(String(b.session_date))); monthList.innerHTML = monthRows.length ? monthRows.map(s => { const c = caseMap.get(String(s.case_id)); return `<div class="agenda-month-item" onclick="openCaseDetails('${escapeHtml(s.case_id)}')"><div class="date">${escapeHtml(String(s.session_date).slice(0,16).replace('T',' '))}</div><strong>${escapeHtml(c?.client_name || 'قضية غير معروفة')}</strong><div class="small text-muted">${escapeHtml(c?.case_code || '')} · ${escapeHtml(s.court_name || c?.court_name || 'المحكمة غير محددة')}</div><span class="badge bg-secondary mt-1">${escapeHtml(s.case_status || 'جديدة')}</span></div>`; }).join('') : '<div class="text-muted text-center py-3">لا توجد جلسات أو قضايا مجدولة في هذا الشهر.</div>'; }
+        if (monthList) { const caseMap = new Map((await db.cases.toArray()).map(c => [String(c.id), c])); const monthRows = sessions.filter(s => s.session_date && s.session_date.startsWith(monthStr)).sort((a,b) => String(a.session_date).localeCompare(String(b.session_date))); monthList.innerHTML = monthRows.length ? monthRows.map(s => { const c = caseMap.get(String(s.case_id)); return `<div class="agenda-month-item" onclick="openAgendaSessionCase('${escapeHtml(s.id)}')"><div class="date">${escapeHtml(String(s.session_date).slice(0,16).replace('T',' '))}</div><strong>${escapeHtml(c?.client_name || 'قضية غير معروفة')}</strong><div class="small text-muted">${escapeHtml(c?.case_code || '')} · ${escapeHtml(s.court_name || c?.court_name || 'المحكمة غير محددة')}</div><span class="badge bg-secondary mt-1">${escapeHtml(s.case_status || 'جديدة')}</span></div>`; }).join('') : '<div class="text-muted text-center py-3">لا توجد جلسات أو قضايا مجدولة في هذا الشهر.</div>'; }
         loadUpcomingEvents();
     } catch (e) { console.error('خطأ في renderCalendar:', e); }
 };
@@ -2280,7 +2308,7 @@ async function getFinanceRows() {
 function renderFinanceRows(rows) {
     const body = document.getElementById('financeTableBody');
     if (!body) return;
-    body.innerHTML = rows.map(r => `<tr><td><strong>${escapeHtml(r.client_name || '-')}</strong><div class="finance-code">${escapeHtml(r.client_phone || '')}</div></td><td>${escapeHtml(r.title)}<div class="finance-code">${escapeHtml(r.code)}</div></td><td>${escapeHtml(r.service)}</td><td>${money(r.total)}</td><td class="text-success fw-bold">${money(r.collected)}</td><td class="text-danger fw-bold">${money(r.spent)}</td><td class="fw-bold ${r.profit >= 0 ? 'text-success' : 'text-danger'}">${money(r.profit)}</td><td><button class="btn btn-sm btn-outline-primary" onclick="openFeesModal('${r.record_id}')"><i class="bi bi-pencil-square"></i> تعديل الحساب</button></td></tr>`).join('') || '<tr><td colspan="8" class="text-center py-4">لا توجد سجلات مالية</td></tr>';
+    body.innerHTML = rows.map(r => `<tr><td><strong>${escapeHtml(r.client_name || '-')}</strong><div class="finance-code">${escapeHtml(r.client_phone || '')}</div></td><td>${escapeHtml(r.title)}<div class="finance-code">${escapeHtml(r.code)}</div></td><td>${escapeHtml(r.service)}</td><td>${money(r.total)}</td><td class="text-success fw-bold">${money(r.collected)}</td><td class="text-danger fw-bold">${money(r.spent)}</td><td class="fw-bold ${r.profit >= 0 ? 'text-success' : 'text-danger'}">${money(r.profit)}</td><td><button class="btn btn-sm btn-outline-primary" onclick="openFeesModal('${r.record_id}')"><i class="bi bi-pencil-square"></i> تعديل الحساب</button>${r.legal_file_id ? `<button class="btn btn-sm btn-outline-success mt-1" onclick="openFeesModal('${r.record_id}','${r.legal_file_id}','stage')"><i class="bi bi-diagram-3"></i> أتعاب المرحلة</button><button class="btn btn-sm btn-outline-warning mt-1" onclick="QMF.openDetails('${r.legal_file_id}')"><i class="bi bi-folder2-open"></i> كل المراحل</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="8" class="text-center py-4">لا توجد سجلات مالية</td></tr>';
 }
 window.loadFinancePage = async function() { showTab('financeTab'); try { financeRows = await getFinanceRows(); const total = financeRows.reduce((s, r) => s + r.total, 0), collected = financeRows.reduce((s, r) => s + r.collected, 0), spent = financeRows.reduce((s, r) => s + r.spent, 0); document.getElementById('financePageFees').innerText = money(total); document.getElementById('financePageCollected').innerText = money(collected); document.getElementById('financePageExpenses').innerText = money(spent); document.getElementById('financePageProfit').innerText = money(collected - spent); renderFinanceRows(financeRows); } catch (error) { console.error('تعذر تحميل الدفتر المالي:', error); const body = document.getElementById('financeTableBody'); if (body) body.innerHTML = `<tr><td colspan="8"><div class="alert alert-danger mb-0">تعذر تحميل الدفتر المالي: ${escapeHtml(error.message || 'خطأ غير معروف')}</div></td></tr>`; } };
 window.filterFinancePage = function() { const q = (document.getElementById('financeSearchInput')?.value || '').trim().toLowerCase(); const type = document.getElementById('financeTypeFilter')?.value || ''; renderFinanceRows(financeRows.filter(r => (!type || r.record_kind === type) && (!q || [r.client_name, r.case_number, r.case_code, r.file_code, r.title, r.court_name, r.service].some(v => String(v || '').toLowerCase().includes(q))))); };

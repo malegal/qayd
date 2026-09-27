@@ -215,9 +215,16 @@
               <div class="col-md-3"><label>صفة العميل</label><input id="qmf_client_role" class="form-control" placeholder="مدعي / مستأنف..."></div>
               <div class="col-md-6"><label>الرقم القومي للعميل</label><input id="qmf_client_nid" class="form-control" inputmode="numeric"></div>
               <div class="col-md-6"><label>عنوان العميل</label><input id="qmf_client_addr" class="form-control"></div>
-              <div class="col-md-6"><label>اسم الخصم</label><input id="qmf_opp_name" class="form-control"></div>
-              <div class="col-md-3"><label>صفة الخصم</label><input id="qmf_opp_role" class="form-control" placeholder="مدعى عليه..."></div>
-              <div class="col-md-3"><label>هاتف الخصم</label><input id="qmf_opp_phone" class="form-control"></div>
+              <div class="col-md-6"><label>إيميل العميل</label><input id="qmf_client_email" type="email" class="form-control"></div>
+              <div class="col-md-4"><label>رقم التوكيل</label><input id="qmf_client_power_number" class="form-control"></div>
+              <div class="col-md-4"><label>سنة التوكيل</label><input id="qmf_client_power_year" class="form-control"></div>
+              <div class="col-md-4"><label>مكتب التوثيق</label><input id="qmf_client_notary" class="form-control"></div>
+              <div class="col-md-4"><label>اسم الخصم</label><input id="qmf_opp_name" class="form-control"></div>
+              <div class="col-md-2"><label>صفة الخصم</label><input id="qmf_opp_role" class="form-control" placeholder="مدعى عليه..."></div>
+              <div class="col-md-2"><label>هاتف الخصم</label><input id="qmf_opp_phone" class="form-control"></div>
+              <div class="col-md-2"><label>الرقم القومي للخصم</label><input id="qmf_opp_nid" class="form-control"></div>
+              <div class="col-md-6"><label>عنوان الخصم</label><input id="qmf_opp_addr" class="form-control"></div>
+              <div class="col-md-6"><label>إيميل الخصم</label><input id="qmf_opp_email" type="email" class="form-control"></div>
               <div class="col-12"><label>وصف مختصر</label><textarea id="qmf_desc" class="form-control" rows="2"></textarea></div>
             </div>
 
@@ -330,16 +337,6 @@
     host.innerHTML = html;
     document.body.appendChild(host);
 
-    // زر الدخول في تبويب القضايا
-    const grid = document.querySelector('.quick-actions-grid');
-    if (grid && !document.getElementById('qmfOpenBtn')) {
-      const btn = document.createElement('button');
-      btn.id = 'qmfOpenBtn';
-      btn.className = 'btn btn-outline-warning quick-action';
-      btn.innerHTML = '<i class="bi bi-folder2-open"></i> الملفات الرئيسية';
-      btn.onclick = () => window.QMF.openPanel();
-      grid.insertBefore(btn, grid.firstChild);
-    }
   }
 
   /* ============================================================
@@ -421,7 +418,7 @@
     if (typeof ownerOnly === 'function' && !ownerOnly('إنشاء ملف رئيسي')) return;
     _editingMainFileId = null;
     ['qmf_title', 'qmf_client_name', 'qmf_client_phone', 'qmf_client_role', 'qmf_client_nid', 'qmf_client_addr',
-      'qmf_opp_name', 'qmf_opp_role', 'qmf_opp_phone', 'qmf_desc', 'qmf_stage_court', 'qmf_stage_circuit',
+      'qmf_opp_name', 'qmf_opp_role', 'qmf_opp_phone', 'qmf_opp_nid', 'qmf_opp_addr', 'qmf_opp_email', 'qmf_client_email', 'qmf_client_power_number', 'qmf_client_power_year', 'qmf_client_notary', 'qmf_desc', 'qmf_stage_court', 'qmf_stage_circuit',
       'qmf_stage_number', 'qmf_stage_year', 'qmf_stage_city', 'qmf_stage_type', 'qmf_stage_subject',
       'qmf_authority_name', 'qmf_authority_number', 'qmf_authority_year', 'qmf_followup_date', 'qmf_followup_action',
       'qmf_fee_total', 'qmf_fee_paid', 'qmf_fee_notes'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
@@ -447,9 +444,16 @@
     set('qmf_client_role', file.client_role || '');
     set('qmf_client_nid', file.client_national_id || '');
     set('qmf_client_addr', file.client_address || '');
+    set('qmf_client_email', file.client_email || '');
+    set('qmf_client_power_number', file.client_power_number || '');
+    set('qmf_client_power_year', file.client_power_year || '');
+    set('qmf_client_notary', file.client_notary_office || '');
     set('qmf_opp_name', file.opponent_name || '');
     set('qmf_opp_role', file.opponent_role || '');
     set('qmf_opp_phone', file.opponent_phone || '');
+    set('qmf_opp_nid', file.opponent_national_id || '');
+    set('qmf_opp_addr', file.opponent_address || '');
+    set('qmf_opp_email', file.opponent_email || '');
     set('qmf_desc', file.description || '');
     // إخفاء أقسام المرحلة والأتعاب عند تعديل بيانات الملف فقط.
     const js = document.getElementById('qmf_judicial_section'); if (js) js.style.display = 'none';
@@ -585,9 +589,16 @@
             client_role: document.getElementById('qmf_client_role').value.trim(),
             client_national_id: document.getElementById('qmf_client_nid').value.trim(),
             client_address: document.getElementById('qmf_client_addr').value.trim(),
+            client_email: document.getElementById('qmf_client_email').value.trim(),
+            client_power_number: document.getElementById('qmf_client_power_number').value.trim(),
+            client_power_year: document.getElementById('qmf_client_power_year').value.trim(),
+            client_notary_office: document.getElementById('qmf_client_notary').value.trim(),
             opponent_name: document.getElementById('qmf_opp_name').value.trim(),
             opponent_role: document.getElementById('qmf_opp_role').value.trim(),
             opponent_phone: document.getElementById('qmf_opp_phone').value.trim(),
+            opponent_national_id: document.getElementById('qmf_opp_nid').value.trim(),
+            opponent_address: document.getElementById('qmf_opp_addr').value.trim(),
+            opponent_email: document.getElementById('qmf_opp_email').value.trim(),
             description: document.getElementById('qmf_desc').value.trim(),
             updated_at: nowEdit
           };
@@ -836,10 +847,13 @@
       </div>
 
       <div class="row g-2 mb-2">
-        <div class="col-md-6"><div class="record-row"><b>العنوان:</b> ${esc(file.title || '—')}</div></div>
-        <div class="col-md-6"><div class="record-row"><b>العميل:</b> ${esc(file.client_name || '—')} ${file.client_role ? '· ' + esc(file.client_role) : ''}</div></div>
-        <div class="col-md-6"><div class="record-row"><b>الخصم:</b> ${esc(file.opponent_name || '—')} ${file.opponent_role ? '· ' + esc(file.opponent_role) : ''}</div></div>
-        <div class="col-md-6"><div class="record-row"><b>الهاتف:</b> ${esc(file.client_phone || '—')}</div></div>
+        <div class="col-md-6"><div class="record-row"><b>عنوان الملف:</b> ${esc(file.title || '—')}</div></div>
+        <div class="col-md-6"><div class="record-row"><b>العميل:</b> ${esc(file.client_name || '—')} · ${esc(file.client_role || '—')}</div></div>
+        <div class="col-md-6"><div class="record-row"><b>هاتف العميل:</b> ${esc(file.client_phone || '—')}<br><b>الإيميل:</b> ${esc(file.client_email || '—')}</div></div>
+        <div class="col-md-6"><div class="record-row"><b>الرقم القومي:</b> ${esc(file.client_national_id || '—')}<br><b>العنوان:</b> ${esc(file.client_address || '—')}</div></div>
+        <div class="col-md-6"><div class="record-row"><b>التوكيل:</b> ${esc(file.client_power_number || '—')} / ${esc(file.client_power_year || '—')}<br><b>مكتب التوثيق:</b> ${esc(file.client_notary_office || '—')}</div></div>
+        <div class="col-md-6"><div class="record-row"><b>الخصم:</b> ${esc(file.opponent_name || '—')} · ${esc(file.opponent_role || '—')}<br><b>الهاتف:</b> ${esc(file.opponent_phone || '—')} · <b>الإيميل:</b> ${esc(file.opponent_email || '—')}</div></div>
+        <div class="col-12"><div class="record-row"><b>بيانات الخصم الإضافية:</b> الرقم القومي ${esc(file.opponent_national_id || '—')} · العنوان ${esc(file.opponent_address || '—')}</div></div>
       </div>
 
       <div class="qmf-fee-summary">

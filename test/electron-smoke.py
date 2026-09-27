@@ -39,7 +39,7 @@ def call(method, params=None):
             return result
 
 call("Page.navigate", {"url": "file:///home/ubuntu/qayd/index.html"})
-time.sleep(1)
+time.sleep(2)
 call("Runtime.enable")
 
 
@@ -96,6 +96,8 @@ area_result = evaluate("""(async()=>{
   }
   return {checks,errors:window.__qaydTestErrors};
 })()""")
+if "checks" not in area_result:
+    fail(f"operational areas probe failed: {area_result}")
 for check in area_result["checks"]:
     if not check["visible"]: fail(f"area {check['id']} is not visible: {check}")
 if area_result["errors"]: fail(f"runtime errors while opening areas: {area_result['errors']}")
