@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0e2440"/>
+      <stop offset="0.55" stop-color="#0b1f3a"/>
+      <stop offset="1" stop-color="#061529"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0d98c"/>
+      <stop offset="0.45" stop-color="#d5b04c"/>
+      <stop offset="0.75" stop-color="#c9a961"/>
+      <stop offset="1" stop-color="#a97c16"/>
+    </linearGradient>
+    <linearGradient id="gold2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e8d18a"/>
+      <stop offset="1" stop-color="#b8862a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- خلفية مربعة بحواف دائرية -->
+  <rect x="24" y="24" width="976" height="976" rx="210" fill="url(#bg)"/>
+  <rect x="60" y="60" width="904" height="904" rx="180" fill="none" stroke="url(#gold)" stroke-width="5" opacity="0.9"/>
+
+  <!-- عارضة الميزان -->
+  <rect x="286" y="300" width="452" height="16" rx="8" fill="url(#gold)"/>
+  <circle cx="286" cy="308" r="16" fill="url(#gold2)"/>
+  <circle cx="738" cy="308" r="16" fill="url(#gold2)"/>
+
+  <!-- القمة المزخرفة -->
+  <circle cx="512" cy="266" r="20" fill="url(#gold)"/>
+  <path d="M512 232 l16 22 -16 22 -16 -22 z" fill="url(#gold2)"/>
+
+  <!-- سلاسل الكفتين -->
+  <line x1="320" y1="316" x2="320" y2="452" stroke="url(#gold)" stroke-width="7" stroke-linecap="round"/>
+  <line x1="704" y1="316" x2="704" y2="452" stroke="url(#gold)" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- كفتا الميزان -->
+  <path d="M244 452 h152 a76 76 0 0 1 -152 0 z" fill="url(#gold)"/>
+  <path d="M628 452 h152 a76 76 0 0 1 -152 0 z" fill="url(#gold)"/>
+
+  <!-- حرف M كعمود مركزي -->
+  <path d="M400 690 L400 430 L512 566 L624 430 L624 690"
+        fill="none" stroke="url(#gold)" stroke-width="40"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- قاعدة -->
+  <rect x="372" y="716" width="280" height="26" rx="13" fill="url(#gold2)"/>
+  <rect x="410" y="748" width="204" height="18" rx="9" fill="url(#gold)" opacity="0.85"/>
+
+  <!-- كلمة قيد -->
+  <text x="512" y="880" text-anchor="middle" font-family="'Amiri','Noto Naskh Arabic','Traditional Arabic',serif"
+        font-size="132" font-weight="700" fill="url(#gold)">قيد</text>
+</svg>
