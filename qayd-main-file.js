@@ -873,9 +873,7 @@
     const { esc, officeName } = G();
     return `<html dir="rtl"><head><meta charset="utf-8"><style>
       body{font-family:Arial,'Noto Sans Arabic',sans-serif;direction:rtl;padding:30px;color:#172b45}
-      .print-head{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #be9124;padding-bottom:10px;margin-bottom:16px}
-      .print-head .office{font-weight:900;color:#12335b;font-size:20px}
-      .print-head .meta{font-size:12px;color:#53657d}
+      ${(window.qaydPrintHeadCSS||'')}
       h1{text-align:center;color:#12335b;margin:6px 0 16px}
       h2{color:#8a6814;font-size:16px;border-bottom:1px solid #e6d9b0;padding-bottom:4px;margin-top:22px}
       table{width:100%;border-collapse:collapse;margin:10px 0}
@@ -886,11 +884,12 @@
       .stage-block h3{margin:0 0 8px;color:#8a6814;font-size:15px}
       .kv{margin:3px 0;font-size:13px}
       .kv b{color:#53657d}
+      .fee-inclusive-note{margin:14px 0 4px;padding:10px 14px;border:1px dashed #be9124;border-radius:8px;background:#fffaf0;color:#7a5c10;font-size:12.5px;font-weight:700;line-height:1.6;text-align:center}
     </style></head><body>
-      <div class="print-head"><div class="office">${esc(officeName || 'مكتب جاد الرب للمحاماة')}</div><div class="meta">تاريخ الطباعة: ${new Date().toLocaleString('ar-EG')}</div></div>
+      ${(window.qaydPrintLetterhead?window.qaydPrintLetterhead(officeName):'')}
       <h1>${esc(title)}</h1>
       ${bodyHtml}
-      <div class="print-foot">نظام قيد لإدارة الملفات القانونية</div>
+      ${(window.qaydPrintFooter?window.qaydPrintFooter():'')}
     </body></html>`;
   }
 
@@ -925,6 +924,7 @@
     body += `<div class="kv"><b>الرقم الإداري:</b> ${esc(file.file_code)} &nbsp; <b>العميل:</b> ${esc(file.client_name || '')}</div>`;
     body += `<table><thead><tr><th>المرحلة</th><th>رقم القضية</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th></tr></thead><tbody>${rows}</tbody></table>`;
     body += `<div class="kv"><b>إجمالي الأتعاب:</b> ${grandTotal.toFixed(2)} &nbsp; <b>إجمالي المدفوع:</b> ${grandPaid.toFixed(2)} &nbsp; <b>المتبقي:</b> ${(grandTotal - grandPaid).toFixed(2)}</div>`;
+    body += `<div class="fee-inclusive-note">هذه المبالغ تشمل الرسوم والضرائب والدمغات والمصاريف الإدارية والتشغيلية والانتقالات والأتعاب.</div>`;
 
     if (stageId && details.length) {
       const d = details[0];
@@ -993,7 +993,7 @@
         <div class="kv"><b>صفة العميل:</b> ${esc(s.client_role || '—')} &nbsp; <b>صفة الخصم:</b> ${esc(s.opponent_role || '—')}</div>
         <div class="kv"><b>الموضوع:</b> ${esc(s.case_subject || '—')} &nbsp; <b>الحالة:</b> ${esc(s.status || '—')}</div>
         ${s.judgment_summary ? `<div class="kv"><b>منطوق الحكم:</b> ${esc(s.judgment_summary)}</div>` : ''}
-        ${sessions.length ? `<div class="kv"><b>الجلسات (${sessions.length}):</b> ${sessions.map(x => esc(String(x.session_date || '').slice(0, 10))).join(' · ')}</div>` : ''}
+        ${sessions.length ? `<div class="kv"><b>عدد الجلسات:</b> ${sessions.length}</div><table><thead><tr><th>التاريخ</th><th>الحالة</th><th>القرار</th></tr></thead><tbody>${sessions.slice().sort((a, b) => new Date(a.session_date) - new Date(b.session_date)).map(x => `<tr><td>${esc(new Date(x.session_date).toLocaleString('ar-EG'))}</td><td>${esc(x.case_status || '')}</td><td>${esc(x.decision || '')}</td></tr>`).join('')}</tbody></table>` : '<div class="kv text-muted">لا توجد جلسات مسجلة لهذه المرحلة.</div>'}
       </div>`;
     }
 
