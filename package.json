@@ -6,6 +6,7 @@
   "homepage": "https://example.com",
   "scripts": {
     "start": "electron .",
+    "test": "node test/mj-finance.test.js",
     "dist": "electron-builder",
     "dist:linux": "electron-builder --linux deb",
     "dist:win": "electron-builder --win",

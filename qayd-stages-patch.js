@@ -124,7 +124,7 @@
     <h5 class="modal-title gold-text">
     <i class="bi bi-diagram-3"></i> إضافة مرحلة تقاضٍ جديدة
     </h5>
-    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
     </div>
     <div class="modal-body">
     <div class="alert alert-info small mb-3">
@@ -201,7 +201,7 @@
     <h5 class="modal-title gold-text">
     <i class="bi bi-clock-history"></i> سجل المراحل القضائية
     </h5>
-    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
     </div>
     <div class="modal-body">
     <div id="stageHistoryBody"></div>
