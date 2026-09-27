@@ -1263,7 +1263,7 @@ window.loadStats = async function() { try { const cases = await db.cases.filter(
 let printLogoDataUrl = null;
 async function getPrintLogoDataUrl() {
     if (printLogoDataUrl) return printLogoDataUrl;
-    try { const response = await fetch('assets/qayd-mj-simple.png'); const bytes = new Uint8Array(await response.arrayBuffer()); let binary = ''; for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); printLogoDataUrl = `data:image/png;base64,${btoa(binary)}`; } catch (_) { printLogoDataUrl = ''; }
+    try { const response = await fetch('assets/qayd-mj-simple-transparent.png'); const bytes = new Uint8Array(await response.arrayBuffer()); let binary = ''; for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); printLogoDataUrl = `data:image/png;base64,${btoa(binary)}`; } catch (_) { printLogoDataUrl = ''; }
     return printLogoDataUrl;
 }
 function printHeaderHtml(logo, office, meta) { return `<div class="head"><div class="brand">${logo ? `<img class="logo" src="${logo}">` : ''}<div><div class="office">قيد</div><div class="suboffice">مكتب جاد الرب للمحاماة<br>محمود عبد الحميد جاد الرب — المحامي</div></div></div><div class="meta">${meta || ''}</div></div>`; }
