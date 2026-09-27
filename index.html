@@ -48,8 +48,8 @@
         .sidebar-brand { padding: 1.2rem 0.8rem; text-align: center; border-bottom: 1px solid var(--border-color); }
         .qayd-mark { width: 54px; height: 54px; margin: 0 auto 0.6rem; border-radius: 17px; display: flex; align-items: center; justify-content: center; background: linear-gradient(145deg, #0b2f67, #16899a); color: #d5b04c; font-size: 2rem; font-weight: 900; box-shadow: 0 5px 16px rgba(0,0,0,.25); }
         .sidebar-brand div { line-height: 1.4; }
-        .nav-pills { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 0.5rem 0; }
-        .nav-pills .nav-link { color: var(--text-muted); padding: 0.8rem 1.2rem; font-size: 0.95rem; border-radius: 0; display: flex; align-items: center; gap: 12px; transition: 0.2s; width: 100%; text-align: right; background: transparent; border: none; cursor: pointer; }
+        .nav-pills { flex: 0 0 auto; overflow: visible; display: flex; flex-direction: column; gap: 1px; padding: 0.35rem 0; }
+        .nav-pills .nav-link { color: var(--text-muted); padding: 0.58rem 0.85rem; font-size: 0.86rem; border-radius: 0; display: flex; align-items: center; gap: 9px; transition: 0.2s; width: 100%; text-align: right; background: transparent; border: none; cursor: pointer; }
         .nav-pills .nav-link:hover { background: rgba(190,145,36,0.10); color: #ffffff; }
         .nav-pills .nav-link.active { background: rgba(190,145,36,0.14); color: var(--gold-solid); border-right: 3px solid var(--gold-solid); font-weight: bold; }
         #mainContent { margin-right: var(--sidebar-width); padding: 1.5rem; min-height: 100vh; }
@@ -154,9 +154,12 @@
 
 <style>
   #sidebar { overflow-x: hidden; }
-  #sidebar .sidebar-tabs { overflow-x: visible; width: 100%; }
+  #sidebar .sidebar-tabs { overflow: visible; width: 100%; }
   #sidebar .sidebar-tabs .nav-link { width: calc(100% - 20px); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
-  #sidebar .sidebar-settings-btn { width: 42px; height: 42px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
+  #sidebar .sidebar-icon-btn { width: 42px; height: 38px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; margin: 0 0 6px 6px; }
+  #sidebar .sidebar-icon-btn i { font-size: 1.15rem; }
+  #sidebar > div:last-child { padding: .55rem .7rem !important; }
+  #sidebar #syncStatusLine { margin-bottom: .35rem !important; font-size: .72rem; }
 </style>
 <style>
 /* Owner workspace layout: each operational area is a page, not a crowded dashboard. */
@@ -244,9 +247,10 @@
 <!-- ========== شاشة تسجيل الدخول ========== -->
 <div id="loginPage">
     <div class="login-box">
-        <div class="mb-2"><span style="font-size: 3.5rem; font-weight: 900;" class="gold-text">قيد</span></div>
-        <div class="text-white-50 small mb-2">نظام إدارة القضايا والملفات القانونية</div>
-        <div class="small text-white-50 mb-4">عند التثبيت لأول مرة: سجّل بيانات مكتبك، ثم فعّل النسخة التجريبية أو أدخل كود التفعيل.</div>
+        <div class="mb-1"><span style="font-size: 3.5rem; font-weight: 900;" class="gold-text">قيد</span></div>
+        <h1 class="h4 mb-2" style="color:#12335b;font-weight:900;">مرحبًا بك في مكتب جاد الرب للمحاماة</h1>
+        <div class="text-muted small mb-2">مرحبًا بك في نظام قيد</div>
+        <div class="small text-muted mb-4">مساحة عمل خاصة وآمنة لإدارة القضايا والملفات والجلسات والأتعاب.</div>
 
         <div class="mb-3">
             <label class="form-label text-white-50">كلمة المرور السريعة (PIN)</label>
@@ -274,7 +278,7 @@
         <div class="nav flex-column nav-pills sidebar-tabs" role="tablist">
             <button class="nav-link active" id="dashboard-tab" data-bs-target="#dashboardTab" type="button" role="tab" onclick="loadDashboardSummary(); refreshOwnerPortal()"><i class="bi bi-speedometer2 fs-5"></i> لوحة التحكم</button>
             <button class="nav-link" id="agenda-tab" data-bs-target="#agendaTab" type="button" role="tab" onclick="renderCalendar()"><i class="bi bi-calendar3 fs-5"></i> الأجندة</button>
-            <button class="nav-link" id="cases-tab" data-bs-target="#cases" type="button" role="tab" onclick="loadCasesList()"><i class="bi bi-folder2-open fs-5"></i> الملفات الرئيسية MJ</button>
+            <button class="nav-link" id="cases-tab" data-bs-target="#cases" type="button" role="tab" onclick="loadCasesList()"><i class="bi bi-folder2-open fs-5"></i> إدارة الملفات</button>
             <!-- تبويب موحّد للأتعاب والمصروفات؛ كان مكرراً في القائمة الجانبية وتم الإبقاء على رابط واحد فقط. -->
             <button class="nav-link" id="finance-tab" data-bs-target="#financeTab" type="button" role="tab" onclick="loadFinancePage()"><i class="bi bi-cash-stack fs-5"></i> الأتعاب والمصروفات</button>
             <!-- تتم إضافة القضايا والملفات والتحقيقات من داخل صفحة إدارة الملفات فقط. -->
@@ -285,7 +289,7 @@
             <span id="syncBadge">0</span>
             <!-- حالة المزامنة: آخر مزامنة، عدد المعلّق، وحالة الاتصال -->
             <div id="syncStatusLine" class="text-center small text-white-50 mb-2"><span id="syncConnDot" class="sync-conn-dot"></span> جارٍ فحص حالة المزامنة...</div>
-            <button class="btn btn-sm btn-outline-success w-100 mb-2" onclick="syncWithSupabase()"><i class="bi bi-arrow-repeat"></i> مزامنة الآن</button>
+            <button class="btn btn-sm btn-outline-success sidebar-icon-btn" onclick="syncWithSupabase()" aria-label="المزامنة" title="المزامنة"><i class="bi bi-arrow-repeat"></i></button>
             <!-- حالة الترخيص وزر التفعيل -->
             <div class="text-center small mb-2" id="licenseStatus">
                 <i class="bi bi-key"></i> <span id="licenseStatusText">جاري التحميل...</span>
@@ -295,8 +299,8 @@
             </button>
             <button class="btn btn-outline-warning w-100 mb-2" id="teamManagementBtn" style="display:none" onclick="showTeamManagement()"><i class="bi bi-people"></i> إدارة الفريق</button>
             <!-- زر الإعدادات -->
-            <button class="btn btn-outline-secondary w-100" onclick="showSettingsModal()">
-                <i class="bi bi-gear"></i> الإعدادات
+            <button class="btn btn-outline-secondary sidebar-icon-btn" onclick="showSettingsModal()" aria-label="الإعدادات" title="الإعدادات">
+                <i class="bi bi-gear"></i>
             </button>
         </div>
     </div>
@@ -345,6 +349,7 @@
                         <div id="upcomingEventsList" style="max-height:250px; overflow-y:auto;"></div>
                     </div>
                 </div>
+                </div>
             </div>
 
 
@@ -360,7 +365,7 @@
             <!-- تبويب القضايا -->
             <div class="tab-pane fade" id="cases" role="tabpanel">
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h3 class="gold-text">الملفات الرئيسية MJ</h3>
+                    <h3 class="gold-text">إدارة الملفات</h3>
                     <!-- المسار الأساسي هو الملف الرئيسي؛ تبقى القوائم القديمة أسفل الصفحة للتوافق أثناء الترحيل. -->
                     <div class="d-flex gap-2 flex-wrap"><button class="gold-btn" onclick="QMF.openCreateModal()"><i class="bi bi-folder-plus"></i> ملف رئيسي جديد</button><button class="btn btn-outline-warning" onclick="QMF.openPanel()"><i class="bi bi-folder2-open"></i> فتح الملفات الرئيسية</button></div>
                     </div>
@@ -445,13 +450,6 @@
                             <div class="mb-3"><label>حالة الجلسة</label><select id="s_case_status" class="form-select"><option>جديدة</option><option>مؤجلة</option><option>مشطوبة</option><option>موقوفة</option><option>محجوزة للحكم</option><option>محكوم فيها</option></select></div>
                             <div class="mb-3"><label>القرار / ما تم في الجلسة</label><textarea id="s_decision" class="form-control" rows="2"></textarea></div><div class="row g-2 mb-4"><div class="col-md-6"><label>المطلوب بعد الجلسة</label><textarea id="s_required_action" class="form-control" rows="2"></textarea></div><div class="col-md-3"><label>المسؤول</label><input id="s_responsible" class="form-control"></div><div class="col-md-3"><label>المتابعة القادمة</label><input type="date" id="s_followup" class="form-control"></div></div>
                             <button class="gold-btn w-100" onclick="saveSession()">حفظ الجلسة</button>
-                        </div>
-                    </div>
-                    <div class="col-lg-7">
-                        <div class="card-glass">
-                            <h5 class="gold-text mb-4">جلسات قادمة</h5>
-                            <div class="btn-group w-100 mb-3"><button type="button" class="btn btn-outline-secondary active" onclick="loadUpcomingSessions('week', this)">الأسبوع الحالي</button><button type="button" class="btn btn-outline-secondary" onclick="loadUpcomingSessions('month', this)">الشهر الحالي</button></div>
-                            <div id="upcomingSessionsList" style="max-height: 500px; overflow-y:auto;"></div>
                         </div>
                     </div>
                 </div>

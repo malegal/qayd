@@ -624,6 +624,12 @@ let allCasesList = [];
 let allOfficeRecords = [];
 window.loadCasesList = async function() {
     try {
+        if (!currentOfficeId) {
+            allCasesList = [];
+            allOfficeRecords = [];
+            filterCasesList();
+            return;
+        }
         allCasesList = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).toArray();
         const professionalFiles = await db.officeFiles.where('office_id').equals(currentOfficeId).filter(f => !f.archived).toArray();
         allOfficeRecords = [...allCasesList.map(c => ({ ...c, record_type: 'judicial' })), ...professionalFiles.map(f => ({ ...f, record_type: f.file_type }))];
@@ -1139,6 +1145,11 @@ window.confirmReschedule = async function() {
 // ========== 12. الأرشيف ==========
 window.loadArchivedCases = async function() {
     try {
+        if (!currentOfficeId) {
+            const empty = document.getElementById('archivedCasesList');
+            if (empty) empty.innerHTML = '<div class="col-12 text-center text-muted">أكمل إعداد المكتب لعرض الأرشيف.</div>';
+            return;
+        }
         const cases = await db.cases.filter(c => c.archived === 1 && c.office_id === currentOfficeId).toArray();
         let html = '';
         for (let c of cases) html += `<div class="col-md-4"><div class="case-card" onclick="openCaseDetails('${c.id}')"><h5 class="gold-text mb-1">${c.client_name}</h5><p class="mb-0 text-white-50 small">كود: ${c.case_code}</p><p class="mb-0 text-white-50 mt-2">رقم: ${c.case_number}/${c.case_year}</p><div class="mt-2 d-flex gap-2"><button class="btn btn-sm btn-outline-info flex-grow-1" onclick="event.stopPropagation(); openArchivedCaseFolder('${c.case_code} - ${c.client_name}'.replace(/[<>:"\/\\|?*]/g, '_'))"><i class="bi bi-folder-symlink"></i> فتح المجلد</button><button class="btn btn-sm btn-outline-danger flex-grow-1" onclick="event.stopPropagation(); permanentlyDeleteArchived('${c.id}')"><i class="bi bi-trash"></i> حذف نهائي</button></div></div></div>`;
@@ -1149,7 +1160,7 @@ window.openArchivedCaseFolder = async function(folderName) { if (!ipcRenderer) r
 window.permanentlyDeleteArchived = async function(id) { const caseData = await db.cases.get(id); const confirm = await Swal.fire({ title: 'تأكيد الحذف النهائي', text: `هل أنت متأكد من حذف "${caseData.client_name}" نهائياً؟`, icon: 'warning', showCancelButton: true, confirmButtonColor: '#dc3545', confirmButtonText: 'نعم', cancelButtonText: 'إلغاء', background: '#0f172a', color: '#fff' }); if (confirm.isConfirmed) await deleteCasePermanently(id); loadArchivedCases(); };
 
 // ========== 13. الإحصائيات و PDF ==========
-window.loadStats = async function() { try { const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).toArray(); const files = await db.officeFiles.where('office_id').equals(currentOfficeId).filter(f => !f.archived).toArray(); const sessions = await db.sessions.filter(s => s.office_id === currentOfficeId).toArray(); document.getElementById('stat-cases').innerText = cases.length + files.length; document.getElementById('stat-total-s').innerText = sessions.length; document.getElementById('stat-clients').innerText = new Set([...cases, ...files].map(c => c.client_name)).size; } catch (e) { console.error('تعذر تحميل إحصاءات المكتب', e); } };
+window.loadStats = async function() { try { const set = (id, value) => { const el = document.getElementById(id); if (el) el.innerText = value; }; if (!currentOfficeId) { set('stat-cases', 0); set('stat-total-s', 0); set('stat-sessions', 0); set('stat-clients', 0); return; } const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).toArray(); const files = await db.officeFiles.where('office_id').equals(currentOfficeId).filter(f => !f.archived).toArray(); const sessions = await db.sessions.filter(s => s.office_id === currentOfficeId).toArray(); set('stat-cases', cases.length + files.length); set('stat-total-s', sessions.length); set('stat-sessions', sessions.length); set('stat-clients', new Set([...cases, ...files].map(c => c.client_name)).size); } catch (e) { console.error('تعذر تحميل إحصاءات المكتب', e); } };
 window.printCasePDF = async function() { if (!currentCaseForPrint) return; const rows=(currentCaseForPrint.sessions||[]).map(x=>`<li>${new Date(x.session_date).toLocaleString('ar-EG')} — ${escapeHtml(x.case_status||'')} — ${escapeHtml(x.decision||'')}</li>`).join('')||'<li>لا توجد جلسات مسجلة</li>'; const html=`<html dir="rtl"><meta charset="utf-8"><style>body{font-family:Arial,'Noto Sans Arabic',sans-serif;direction:rtl;padding:30px;color:#172b45}.print-head{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #be9124;padding-bottom:10px;margin-bottom:16px}.print-head .office{font-weight:900;color:#12335b;font-size:20px}.print-head .meta{font-size:12px;color:#53657d}h1{text-align:center;color:#12335b}li{margin:10px 0}.print-foot{margin-top:26px;border-top:1px solid #d9e1eb;padding-top:8px;font-size:11px;color:#53657d;text-align:center}</style><div class="print-head"><div class="office">${'مكتب جاد الرب للمحاماة'}</div><div class="meta">تاريخ الطباعة: ${new Date().toLocaleString('ar-EG')}</div></div><h1>تقرير القضية</h1><p>العميل: ${escapeHtml(currentCaseForPrint.client_name)}</p><p>رقم القضية: ${escapeHtml(currentCaseForPrint.case_number)}/${escapeHtml(currentCaseForPrint.case_year)}</p><p>المحكمة: ${escapeHtml(currentCaseForPrint.court_name)}</p><p>كود القضية: ${escapeHtml(currentCaseForPrint.case_code||'')}</p><h2>سجل الجلسات</h2><ul>${rows}</ul><div class="print-foot">نظام قيد لإدارة الملفات القانونية</div></html>`; if (ipcRenderer?.printArabicPdf) await ipcRenderer.printArabicPdf(html, `قضية_${currentCaseForPrint.case_number||'تقرير'}.pdf`); };
 
 // ========== 14. المزامنة مع Supabase ==========
@@ -1164,7 +1175,6 @@ async function ensureDesktopSupabaseSession() {
     if (session?.user?.email?.toLowerCase() === String(office.email).toLowerCase()) {
         const { data: membership } = await supabaseClient.from('office_members').select('role').eq('office_id', currentOfficeId).eq('user_id', session.user.id).maybeSingle();
         currentUserRole = isOwnerEmail(office.email) ? 'manager' : (membership?.role || null);
-        document.querySelector('#finance-tab')?.classList.toggle('d-none', !canSeeFinance());
         document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', currentUserRole !== 'manager');
         const ownerReviewBtn = document.querySelector('#ownerReviewBtn'); if (ownerReviewBtn) ownerReviewBtn.style.display = currentUserRole === 'manager' ? 'block' : 'none';
         return true;
@@ -1183,7 +1193,6 @@ async function ensureDesktopSupabaseSession() {
     if (isOwnerEmail(office.email) && currentUserRole === 'manager') {
         await supabaseClient.from('office_members').upsert({ user_id: (await supabaseClient.auth.getUser()).data.user?.id, office_id: currentOfficeId, role: 'manager', display_name: 'محمود عبد الحميد' }, { onConflict: 'user_id,office_id' });
     }
-    document.querySelector('#finance-tab')?.classList.toggle('d-none', !canSeeFinance());
     document.querySelector('#teamManagementBtn')?.classList.toggle('d-none', currentUserRole !== 'manager');
     const ownerReviewBtn = document.querySelector('#ownerReviewBtn'); if (ownerReviewBtn) ownerReviewBtn.style.display = currentUserRole === 'manager' ? 'block' : 'none';
     return true;
@@ -1914,6 +1923,7 @@ window.printFeesPDF = async function() {
 let financeRows = [];
 function money(value) { return (Number(value) || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 async function getFinanceRows() {
+    if (!currentOfficeId) return [];
     const ledger = await db.financialTransactions.where('office_id').equals(currentOfficeId).toArray();
     const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).toArray();
     const files = await db.officeFiles.filter(f => !f.archived && f.office_id === currentOfficeId).toArray();
@@ -2306,8 +2316,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     bindManualTabs();
     document.querySelectorAll('.tab-pane').forEach(pane => { pane.style.display = 'none'; });
     await initSupabase();
+    // شاشة الترحيب هي نقطة البداية؛ يفتح المستخدم نموذج التسجيل عند اختيار «تسجيل مكتب جديد».
     const hasOffice = await checkOfficeSetup();
-    if (!hasOffice) showModal('officeSetupModal');
     if (hasOffice) {
         runBackgroundSync();
         scheduleBackgroundSync();
