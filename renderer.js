@@ -630,9 +630,19 @@ window.loadCasesList = async function() {
             filterCasesList();
             return;
         }
-        allCasesList = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).toArray();
+        const rawCases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).toArray();
+        // القضايا المرحلية (التابعة لملف رئيسي) لا تُعرض كسجلات مستقلة — يظهر الملف الرئيسي فقط.
+        allCasesList = rawCases.filter(c => !c.legal_file_id);
+        // الملفات الرئيسية (MJ) هي السجل الأساسي في إدارة الملفات.
+        let mainFiles = [];
+        try { mainFiles = await db.legalFiles.toArray(); } catch (e) { mainFiles = []; }
+        mainFiles = mainFiles.filter(f => (!f.office_id || f.office_id === currentOfficeId) && String(f.status || '') !== 'archived');
         const professionalFiles = await db.officeFiles.where('office_id').equals(currentOfficeId).filter(f => !f.archived).toArray();
-        allOfficeRecords = [...allCasesList.map(c => ({ ...c, record_type: 'judicial' })), ...professionalFiles.map(f => ({ ...f, record_type: f.file_type }))];
+        allOfficeRecords = [
+            ...mainFiles.map(f => ({ ...f, record_type: 'main_file' })),
+            ...allCasesList.map(c => ({ ...c, record_type: 'judicial' })),
+            ...professionalFiles.map(f => ({ ...f, record_type: f.file_type }))
+        ];
         filterCasesList();
     } catch (error) {
         console.error('تعذر تحميل إدارة القضايا:', error);
@@ -645,19 +655,25 @@ function filterCasesList() {
     const court = document.getElementById('courtFilter')?.value || '';
     const service = document.getElementById('serviceFilter')?.value || '';
     const filtered = allOfficeRecords.filter(record => {
-        const haystack = [record.client_name, record.title, record.court_name, record.case_number, record.file_code, record.case_code].filter(Boolean).join(' ').toLowerCase();
-        return (!search || haystack.includes(search)) && (!court || record.court_name === court) && (!service || record.record_type === service);
+        const haystack = [record.client_name, record.title, record.court_name, record.case_number, record.case_year, record.file_code, record.case_code, record.case_subject, record.client_phone, record.opponent_name, record.description].filter(Boolean).join(' ').toLowerCase();
+        const matchesService = !service || record.record_type === service || (service === 'judicial' && record.record_type === 'main_file' && (record.file_category === 'judicial' || record.file_type === 'judicial' || record.file_type === 'enforcement'));
+        return (!search || haystack.includes(search)) && (!court || record.court_name === court) && matchesService;
     });
     const container = document.getElementById('casesListContainer');
     if (!container) return;
     container.innerHTML = filtered.length ? filtered.map(record => {
+        const isMain = record.record_type === 'main_file';
         const judicial = record.record_type === 'judicial';
-        const label = judicial ? 'ملف قضائي' : professionalTypeLabel(record.record_type);
+        const label = isMain ? 'ملف رئيسي' : (judicial ? 'ملف قضائي' : professionalTypeLabel(record.record_type));
+        const badge = isMain ? 'bg-warning text-dark' : (judicial ? 'bg-primary' : 'bg-success');
         const reference = judicial ? `${record.case_number || ''}/${record.case_year || ''}` : record.file_code;
-        return `<div class="case-card-item" data-id="${record.id}" onclick="${judicial ? `openCaseDetails('${record.id}')` : `selectProfessionalFile('${record.id}')`}">
-          <div class="d-flex justify-content-between gap-2"><strong class="gold-text">${escapeHtml(record.client_name || record.title)}</strong><span class="badge ${judicial ? 'bg-primary' : 'bg-success'}">${label}</span></div>
-          <div class="small mt-1">${escapeHtml(record.title || record.case_subject || '')}</div>${judicial ? `<span class="badge bg-light text-dark case-status-badge mt-1">${escapeHtml(record.status || 'جديدة')}</span>` : ''}
-          <div class="small">${escapeHtml(judicial ? (record.court_name || 'محكمة غير محددة') : 'ملف بلا جلسات محكمة')}${judicial && record.case_type ? ` | ${escapeHtml(record.case_type)}` : ''}</div>
+        const onclick = isMain ? `QMF.openDetails('${record.id}')` : (judicial ? `openCaseDetails('${record.id}')` : `selectProfessionalFile('${record.id}')`);
+        const statusBadge = (isMain || judicial) ? `<span class="badge bg-light text-dark case-status-badge mt-1">${escapeHtml(record.status || (isMain ? 'جديد' : 'جديدة'))}</span>` : '';
+        const sub = isMain ? (record.description || 'ملف رئيسي موحّد — انقر لعرض المراحل والجلسات') : (judicial ? (record.court_name || 'محكمة غير محددة') : 'ملف بلا جلسات محكمة');
+        return `<div class="case-card-item" data-id="${record.id}" onclick="${onclick}">
+          <div class="d-flex justify-content-between gap-2"><strong class="gold-text">${escapeHtml(record.client_name || record.title)}</strong><span class="badge ${badge}">${label}</span></div>
+          <div class="small mt-1">${escapeHtml(record.title || record.case_subject || '')}</div>${statusBadge}
+          <div class="small">${escapeHtml(sub)}${judicial && record.case_type ? ` | ${escapeHtml(record.case_type)}` : ''}</div>
           <div class="small text-warning mt-1">الكود: ${escapeHtml(record.case_code || record.file_code || 'غير محدد')} · المرجع: ${escapeHtml(reference)}</div>
         </div>`;
     }).join('') : '<div class="text-center text-white-50 py-4">لا توجد ملفات مطابقة للبحث أو الفلاتر.</div>';
@@ -876,8 +892,22 @@ window.openNotes = async function() {
 window.searchCasesForSession = async function(q) {
     if (q.length < 2) { document.getElementById('caseSearchResults').style.display = 'none'; return; }
     try {
-        const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).filter(c => String(c.client_name).includes(q) || String(c.case_number).includes(q) || String(c.case_code).toLowerCase().includes(q.toLowerCase())).limit(10).toArray();
-        let html = cases.map(c => `<div class="p-2 border-bottom border-secondary text-white" style="cursor:pointer" onclick="selectCaseForSession('${c.id}')"><span class="text-warning">${c.case_code}</span> - ${c.client_name} (${c.case_number})</div>`).join('');
+        const ql = q.toLowerCase();
+        const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).filter(c => String(c.client_name || '').toLowerCase().includes(ql) || String(c.case_number || '').includes(q) || String(c.case_code || '').toLowerCase().includes(ql) || String(c.main_file_code || '').toLowerCase().includes(ql)).limit(10).toArray();
+        // البحث أيضاً في الملفات الرئيسية (MJ) وربطها بالمرحلة الحالية.
+        let mainStages = [];
+        try {
+            const files = await db.legalFiles.filter(f => (!f.office_id || f.office_id === currentOfficeId) && String(f.status || '') !== 'archived' && (String(f.file_code || '').toLowerCase().includes(ql) || String(f.client_name || '').toLowerCase().includes(ql) || String(f.title || '').toLowerCase().includes(ql))).limit(8).toArray();
+            for (const f of files) {
+                const stages = await db.cases.filter(c => c.legal_file_id === f.id).toArray();
+                if (stages.length) {
+                    stages.sort((a, b) => (Number(b.stage_order) || 0) - (Number(a.stage_order) || 0));
+                    mainStages.push({ ...stages[0], _isMain: true, _mainCode: f.file_code });
+                }
+            }
+        } catch (e) { }
+        const merged = [...mainStages, ...cases].filter((c, i, all) => all.findIndex(x => x.id === c.id) === i).slice(0, 10);
+        let html = merged.map(c => `<div class="p-2 border-bottom text-dark" style="cursor:pointer" onclick="selectCaseForSession('${c.id}')"><span class="text-warning fw-bold">${escapeHtml(c._mainCode || c.case_code || '')}</span> - ${escapeHtml(c.client_name || '')} (${escapeHtml(c.case_number || '')})${c._isMain ? ' <span class="badge bg-warning text-dark">ملف رئيسي</span>' : ''}</div>`).join('');
         const resDiv = document.getElementById('caseSearchResults');
         resDiv.innerHTML = html; resDiv.style.display = html ? 'block' : 'none';
     } catch (e) { }
@@ -912,6 +942,8 @@ window.saveSession = async function() {
     loadUpcomingSessions('week'); renderCalendar(); updatePendingBadge();
 };
 window.loadUpcomingSessions = async function(range, btn) {
+    const host = document.getElementById('upcomingSessionsList');
+    if (!host) return; // أُزيل قسم جلسات الأسبوع/الشهر من نموذج الجلسات
     if (btn) { document.querySelectorAll('#sessionsModal .btn-group .btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }
     const now = new Date(); const start = now.toISOString().split('T')[0]; const end = new Date();
     if (range === 'week') end.setDate(now.getDate() + 7); else end.setMonth(now.getMonth() + 1);
@@ -1993,17 +2025,17 @@ window.runLiveSearch = async function(rawQuery) {
             db.officeFiles.where('office_id').equals(currentOfficeId).toArray(),
             db.legalFiles.where('office_id').equals(currentOfficeId).toArray()
         ]);
-        const caseHits = cases.filter(c => has(c.client_name, c.case_number, c.case_year, c.case_code, c.client_phone, c.court_name, c.case_subject, c.opponent_name));
+        const caseHits = cases.filter(c => !c.legal_file_id).filter(c => has(c.client_name, c.case_number, c.case_year, c.case_code, c.client_phone, c.court_name, c.case_subject, c.opponent_name));
         const sessionHits = sessions.filter(s => has(s.case_status, s.decision, s.session_date, s.court_name, s.circuit));
         const taskHits = tasks.filter(t => (!t.office_id || t.office_id === currentOfficeId) && has(t.description, t.date));
         const eventHits = events.filter(e => has(e.title, e.date, e.type));
         const noteHits = notes.filter(n => has(n.content));
         const officeFileHits = officeFiles.filter(f => has(f.file_code, f.client_name, f.client_phone, f.file_type, f.status));
-        const legalFileHits = legalFiles.filter(f => has(f.file_code, f.client_name, f.status, f.file_type));
+        const legalFileHits = legalFiles.filter(f => String(f.status || '') !== 'archived' && has(f.file_code, f.client_name, f.status, f.file_type, f.title));
         const html = [
-            section('القضايا القضائية', 'bi-briefcase', caseHits.map(c => row(`${c.client_name || 'قضية'} — ${c.case_code || ''}`, `رقم: ${c.case_number || '-'}/${c.case_year || '-'} · ${c.court_name || ''}`, `showTab('cases'); openCaseDetails('${c.id}')`))),
-            section('الملفات القضائية (النموذج الموحّد)', 'bi-folder2-open', legalFileHits.map(f => row(`${f.client_name || 'ملف'} — ${f.file_code || ''}`, `النوع: ${f.file_type || '-'} · الحالة: ${f.status || '-'}`, `showTab('cases')`))),
-            section('الملفات الإجرائية والخدمية', 'bi-folder-symlink', officeFileHits.map(f => row(`${f.client_name || 'ملف'} — ${f.file_code || ''}`, `النوع: ${f.file_type || '-'} · الحالة: ${f.status || '-'}`, `showTab('cases')`))),
+            section('الملفات الرئيسية (MJ)', 'bi-folder2-open', legalFileHits.map(f => row(`${f.client_name || 'ملف'} — ${f.file_code || ''}`, `النوع: ${f.file_type || '-'} · الحالة: ${f.status || '-'}`, `showTab('cases'); QMF.openDetails('${f.id}')`))),
+            section('القضايا القضائية المستقلة', 'bi-briefcase', caseHits.map(c => row(`${c.client_name || 'قضية'} — ${c.case_code || ''}`, `رقم: ${c.case_number || '-'}/${c.case_year || '-'} · ${c.court_name || ''}`, `showTab('cases'); openCaseDetails('${c.id}')`))),
+            section('الملفات الإجرائية والخدمية', 'bi-folder-symlink', officeFileHits.map(f => row(`${f.client_name || 'ملف'} — ${f.file_code || ''}`, `النوع: ${f.file_type || '-'} · الحالة: ${f.status || '-'}`, `showTab('cases'); selectProfessionalFile('${f.id}')`))),
             section('الجلسات', 'bi-calendar-event', sessionHits.map(s => row(`${new Date(s.session_date).toLocaleDateString('ar-EG')} — ${s.case_status || ''}`, `${s.decision || 'لا يوجد قرار'}`, `openSessionsModal()`))),
             section('المهام', 'bi-list-check', taskHits.map(t => row(`${t.completed ? '✔ ' : '• '}${t.description || 'مهمة'}`, `التاريخ: ${t.date || '-'}`, `showTab('agendaTab')`))),
             section('الأحداث (الأجندة)', 'bi-calendar3', eventHits.map(e => row(`${e.title || 'حدث'}`, `التاريخ: ${e.date || '-'} · ${e.type || ''}`, `showTab('agendaTab')`))),

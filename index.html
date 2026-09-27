@@ -390,6 +390,7 @@
                             </select>
                             <select id="serviceFilter" class="form-select" onchange="filterCasesList()">
                                 <option value="">كل الخدمات</option>
+                                <option value="main_file">ملف رئيسي (MJ)</option>
                                 <option value="judicial">ملف قضائي</option>
                                 <option value="real_estate">تسجيل شهر عقاري</option>
                                 <option value="contract_writing">كتابة عقد</option>
@@ -430,27 +431,56 @@
 
             <!-- تبويب الجلسات -->
             <div class="tab-pane fade" id="sessions" role="tabpanel">
-                <h3 class="gold-text mb-4">إضافة جلسة ومتابعة</h3>
-                <div class="row g-4">
-                    <div class="col-lg-5">
-                        <div class="card-glass">
-                            <h5 class="gold-text mb-4">تسجيل جلسة جديدة</h5>
-                            <div class="mb-3">
-                                <label>ابحث عن القضية</label>
-                                <input id="s_search" class="form-control" placeholder="اسم العميل، الرقم..." onkeyup="searchCasesForSession(this.value)">
-                                <div id="caseSearchResults" class="mt-2 bg-dark border border-secondary" style="max-height:200px; overflow-y:auto; display:none; position:absolute; width:90%; z-index:100;"></div>
+                <h3 class="gold-text mb-4"><i class="bi bi-calendar-plus"></i> إضافة جلسة ومتابعة</h3>
+                <div class="card-glass session-form-card">
+                    <div class="session-form-grid">
+                        <div class="session-form-section">
+                            <div class="session-form-section-title"><i class="bi bi-folder2-open"></i> بيانات القضية</div>
+                            <div class="mb-2" style="position:relative;">
+                                <label>ابحث عن القضية (اسم العميل أو الرقم أو الكود)</label>
+                                <input id="s_search" class="form-control" placeholder="اكتب للبحث..." onkeyup="searchCasesForSession(this.value)" autocomplete="off">
+                                <div id="caseSearchResults" class="mt-1" style="max-height:220px; overflow-y:auto; display:none; position:absolute; width:100%; z-index:100;"></div>
                             </div>
-                            <div class="mb-3"><label>كود القضية المختار</label><input id="s_case_code" class="form-control text-warning fw-bold" readonly placeholder="لم يتم الاختيار"></div>
-                            <div class="row g-2 mb-3"><div class="col-md-6"><label>رقم القضية</label><input id="s_case_number" class="form-control" readonly></div><div class="col-md-6"><label>سنة القضية</label><input id="s_case_year" class="form-control" readonly></div></div>
-                            <div class="row g-2 mb-3"><div class="col-md-5"><label>المحكمة</label><input id="s_court" class="form-control"></div><div class="col-md-4"><label>الدائرة</label><input id="s_circuit" class="form-control"></div><div class="col-md-3"><label>المدينة</label><input id="s_city" class="form-control"></div></div>
-                            <div class="mb-3"><label>اسم العميل</label><input id="s_client" class="form-control" readonly></div>
-                            <div class="mb-3"><label>صفة العميل</label><input id="s_client_role" class="form-control" readonly></div>
-                            <div class="mb-3"><label>اسم الخصم</label><input id="s_opponent" class="form-control text-danger" readonly></div>
-                            <div class="mb-3"><label>تاريخ ووقت الجلسة</label><input type="datetime-local" id="s_date" class="form-control"></div>
-                            <div class="mb-3"><label>حالة الجلسة</label><select id="s_case_status" class="form-select"><option>جديدة</option><option>مؤجلة</option><option>مشطوبة</option><option>موقوفة</option><option>محجوزة للحكم</option><option>محكوم فيها</option></select></div>
-                            <div class="mb-3"><label>القرار / ما تم في الجلسة</label><textarea id="s_decision" class="form-control" rows="2"></textarea></div><div class="row g-2 mb-4"><div class="col-md-6"><label>المطلوب بعد الجلسة</label><textarea id="s_required_action" class="form-control" rows="2"></textarea></div><div class="col-md-3"><label>المسؤول</label><input id="s_responsible" class="form-control"></div><div class="col-md-3"><label>المتابعة القادمة</label><input type="date" id="s_followup" class="form-control"></div></div>
-                            <button class="gold-btn w-100" onclick="saveSession()">حفظ الجلسة</button>
+                            <div class="row g-2">
+                                <div class="col-md-6"><label>كود القضية</label><input id="s_case_code" class="form-control text-warning fw-bold" readonly placeholder="لم يتم الاختيار"></div>
+                                <div class="col-md-3"><label>رقم القضية</label><input id="s_case_number" class="form-control" readonly></div>
+                                <div class="col-md-3"><label>السنة</label><input id="s_case_year" class="form-control" readonly></div>
+                            </div>
+                            <div class="row g-2">
+                                <div class="col-md-6"><label>اسم العميل</label><input id="s_client" class="form-control" readonly></div>
+                                <div class="col-md-6"><label>صفة العميل</label><input id="s_client_role" class="form-control" readonly></div>
+                            </div>
+                            <div class="row g-2">
+                                <div class="col-md-6"><label>اسم الخصم</label><input id="s_opponent" class="form-control text-danger" readonly></div>
+                            </div>
                         </div>
+                        <div class="session-form-section">
+                            <div class="session-form-section-title"><i class="bi bi-calendar-event"></i> بيانات الجلسة</div>
+                            <div class="row g-2">
+                                <div class="col-md-6"><label>تاريخ ووقت الجلسة</label><input type="datetime-local" id="s_date" class="form-control"></div>
+                                <div class="col-md-6"><label>حالة الجلسة</label><select id="s_case_status" class="form-select"><option>جديدة</option><option>مؤجلة</option><option>مشطوبة</option><option>موقوفة</option><option>محجوزة للحكم</option><option>محكوم فيها</option></select></div>
+                            </div>
+                            <div class="row g-2">
+                                <div class="col-md-5"><label>المحكمة</label><input id="s_court" class="form-control"></div>
+                                <div class="col-md-4"><label>الدائرة</label><input id="s_circuit" class="form-control"></div>
+                                <div class="col-md-3"><label>المدينة</label><input id="s_city" class="form-control"></div>
+                            </div>
+                            <div class="row g-2">
+                                <div class="col-md-6"><label>المسؤول</label><input id="s_responsible" class="form-control" placeholder="من يتابع الجلسة"></div>
+                                <div class="col-md-6"><label>المتابعة القادمة</label><input type="date" id="s_followup" class="form-control"></div>
+                            </div>
+                        </div>
+                        <div class="session-form-section session-form-section-wide">
+                            <div class="session-form-section-title"><i class="bi bi-clipboard-check"></i> نتائج الجلسة والمتابعة</div>
+                            <div class="row g-2">
+                                <div class="col-md-6"><label>القرار / ما تم في الجلسة</label><textarea id="s_decision" class="form-control" rows="3"></textarea></div>
+                                <div class="col-md-6"><label>المطلوب بعد الجلسة</label><textarea id="s_required_action" class="form-control" rows="3"></textarea></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="session-form-actions">
+                        <button class="btn btn-outline-secondary" onclick="document.getElementById('s_search').value=''; document.getElementById('caseSearchResults').style.display='none';">تفريغ البحث</button>
+                        <button class="gold-btn" onclick="saveSession()"><i class="bi bi-check-lg"></i> حفظ الجلسة</button>
                     </div>
                 </div>
             </div>
@@ -826,6 +856,21 @@ label, .form-label { color:var(--text) !important; font-weight:700; }
 #feesModal .modal-content{background:#fff;color:var(--text,#172b45);border:1px solid var(--border,#d8e1ec);border-radius:14px}#feesModal .modal-body{color:var(--text,#172b45)!important}#feesModal .bg-dark{background:#f8fafc!important;color:var(--text,#172b45)!important;border-color:var(--border,#d8e1ec)!important}#feesModal .text-white-50{color:var(--muted,#53657d)!important}#feesModal .border-secondary{border-color:var(--border,#d8e1ec)!important}#feesModal .modal-header{border-bottom-color:var(--border,#d8e1ec)}#feesModal .modal-footer{border-top-color:var(--border,#d8e1ec)}#feeContextTitle{font-size:.78rem;font-weight:600}
 @media(max-width:600px){#feesModal .row.mb-4.text-center>.col-4{width:100%;max-width:100%;flex:0 0 100%}#feesModal .modal-dialog{margin:.5rem}.modal-dialog-scrollable .modal-content{max-height:calc(100vh - 1rem)}}
 .professional-file-row { background:#ffffff; color:var(--text, #172b45); border-color:var(--border, #d8e1ec); }.record-detail { color:var(--text); font-size:1rem; }.record-code { background:var(--navy); color:#fff; border-radius:8px; padding:10px 14px; font-weight:800; margin-bottom:12px; direction:rtl; }.record-row { padding:7px 0; border-bottom:1px solid var(--border); }.record-row strong { color:var(--navy); }.party-card { background:#f8fafc; border:1px solid var(--border); border-right:4px solid var(--gold); border-radius:10px; padding:12px; margin:12px 0; }.party-card h6 { font-weight:800; }.party-card strong { color:var(--navy); }.detail-action-grid { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }.detail-action-grid .btn { flex:1 1 auto; min-width:120px; }
+
+/* ===== نموذج الجلسات المحسّن (مودال الأجندة) ===== */
+.session-form-card { padding: 1.25rem; }
+.session-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.session-form-section { border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.1rem; background: #f8fafc; }
+.session-form-section-wide { grid-column: 1 / -1; }
+.session-form-section-title { color: var(--navy); font-weight: 800; font-size: 1.02rem; margin-bottom: .85rem; padding-bottom: .5rem; border-bottom: 2px solid rgba(168,117,8,.35); display: flex; align-items: center; gap: .5rem; }
+.session-form-section label { font-size: .85rem; margin-bottom: .25rem; display: block; }
+.session-form-section .row { margin-bottom: .55rem; }
+.session-form-actions { display: flex; justify-content: flex-end; gap: .6rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.session-form-actions .gold-btn { min-width: 240px; }
+#caseSearchResults { background: #fff !important; border: 1px solid var(--border) !important; border-radius: 8px; box-shadow: 0 8px 20px rgba(18,51,91,.15); }
+#caseSearchResults > div { color: var(--text) !important; }
+#caseSearchResults > div:hover { background: rgba(168,117,8,.10); }
+@media (max-width: 900px) { .session-form-grid { grid-template-columns: 1fr; } .session-form-actions .gold-btn { width: 100%; } }
 </style>
 <div class="modal fade" id="teamManagementModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title gold-text">إدارة فريق المكتب</h5></div><div class="modal-body"><label>البريد أو الهاتف</label><input id="teamInviteContact" class="form-control mb-3" placeholder="member@example.com"><label>الدور</label><select id="teamInviteRole" class="form-select mb-3"><option value="lawyer">محامي</option><option value="staff">سكرتيرة</option><option value="accountant">محاسب</option></select><button class="gold-btn w-100" onclick="createDesktopInvite()">إنشاء كود الدعوة</button><div id="teamInviteResult" class="text-center fw-bold mt-3"></div><hr><button class="btn btn-outline-warning w-100" onclick="createDesktopRecoveryCodes()">إنشاء رموز استرداد المالك</button><pre id="teamRecoveryResult" class="mt-3"></pre></div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button></div></div></div></div>
     <script src="qayd-finance.js"></script>
