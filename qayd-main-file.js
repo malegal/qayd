@@ -1199,6 +1199,7 @@
     body += `<div class="kv"><b>الرقم الإداري:</b> ${esc(file.file_code)} &nbsp; <b>العميل:</b> ${esc(file.client_name || '')}</div>`;
     body += `<table><thead><tr><th>المرحلة</th><th>رقم القضية</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th></tr></thead><tbody>${rows}</tbody></table>`;
     body += `<div class="kv"><b>إجمالي الأتعاب:</b> ${grandTotal.toFixed(2)} &nbsp; <b>إجمالي المدفوع:</b> ${grandPaid.toFixed(2)} &nbsp; <b>المتبقي:</b> ${(grandTotal - grandPaid).toFixed(2)}</div>`;
+    body += `<p class="fee-terms">هذه المبالغ تشمل الرسوم القضائية والحكومية والدمغات والضرائب والمصاريف الإدارية والتشغيلية والانتقالات والأتعاب حسب العقد والاتفاق المبرم.</p>`;
 
     if (stageId && details.length) {
       const d = details[0];

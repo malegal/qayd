@@ -37,8 +37,8 @@ ok('C6 printCasePDF shows a human stage label ("مرحلة ...")',
 const pfStart = renderer.indexOf('window.printFeesPDF =');
 const pfEnd = renderer.indexOf('\n};', pfStart);
 const printFees = renderer.slice(pfStart, pfEnd);
-ok('B5 fee receipt contains the fees/taxes/stamps sentence',
-  printFees.includes('هذه المبالغ تشمل الرسوم و الضرائب و الدمغات و المصاريف الإدارية و التشغيلية و الانتقالات و الأتعاب حسب عقد الاتفاق'));
+ok('B5 fee report contains the judicial/government fees and agreement sentence',
+  printFees.includes('هذه المبالغ تشمل الرسوم القضائية والحكومية والدمغات والضرائب والمصاريف الإدارية والتشغيلية والانتقالات والأتعاب حسب العقد والاتفاق المبرم'));
 
 // ---------- Form: no duplicate fields (B2) ----------
 ok('B2 case_subject appears exactly once in the form',
