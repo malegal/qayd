@@ -1571,9 +1571,12 @@ window.loadUpcomingSessions = async function(range, btn) {
     try {
         const sessions = await db.sessions.where('session_date').between(start, endStr, true, true).filter(s => s.office_id === currentOfficeId).toArray();
         sessions.sort((a, b) => a.session_date.localeCompare(b.session_date));
+        const caseIds = [...new Set(sessions.map(s => String(s.case_id)).filter(Boolean))];
+        const caseRows = caseIds.length ? await db.cases.bulkGet(caseIds) : [];
+        const caseMap = new Map((caseRows || []).filter(Boolean).map(c => [String(c.id), c]));
         let html = '';
         for (let s of sessions) {
-            const c = await db.cases.get(s.case_id);
+            const c = caseMap.get(String(s.case_id));
             if (c) html += `<div class="session-card" onclick="openCaseDetails('${c.id}')"><div class="d-flex justify-content-between"><span class="gold-text">${new Date(s.session_date).toLocaleString('ar-EG', { dateStyle: 'full', timeStyle: 'short' })}</span><span class="case-status status-new">${s.case_status}</span></div><div class="mt-2"><strong>${c.client_name || 'عميل غير مسجل'}</strong> - ${c.case_number || 'رقم غير مسجل'}${c.case_year ? '/' + c.case_year : ''}</div><div class="mt-1 text-white-50">${c.court_name || 'محكمة غير مسجلة'} · ${c.circuit || 'دائرة غير مسجلة'}</div><div class="mt-1 text-white">${s.decision || ''}</div></div>`;
         }
         document.getElementById('upcomingSessionsList').innerHTML = html || '<div class="text-muted">لا توجد جلسات في هذه الفترة</div>';
@@ -1634,11 +1637,15 @@ window.renderCalendar = async function() {
         const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
         let html = '';
         for (let i = 0; i < offset; i++) html += '<div class="calendar-day empty"></div>';
+        const sessionsByDate = new Map(), eventsByDate = new Map(), tasksByDate = new Map();
+        for (const item of sessions) { const key = String(item.session_date || '').slice(0, 10); if (!sessionsByDate.has(key)) sessionsByDate.set(key, []); sessionsByDate.get(key).push(item); }
+        for (const item of events) { const key = String(item.date || '').slice(0, 10); if (!eventsByDate.has(key)) eventsByDate.set(key, []); eventsByDate.get(key).push(item); }
+        for (const item of tasks) { if (item.completed) continue; const key = String(item.date || '').slice(0, 10); if (!tasksByDate.has(key)) tasksByDate.set(key, []); tasksByDate.get(key).push(item); }
         for (let d = 1; d <= daysInMonth; d++) {
             const dateStr = `${monthStr}-${String(d).padStart(2, '0')}`;
-            const dSess = sessions.filter(s => s.session_date && s.session_date.startsWith(dateStr));
-            const dEvt = events.filter(e => e.date === dateStr);
-            const dTask = tasks.filter(t => t.date === dateStr && !t.completed);
+            const dSess = sessionsByDate.get(dateStr) || [];
+            const dEvt = eventsByDate.get(dateStr) || [];
+            const dTask = tasksByDate.get(dateStr) || [];
             let isToday = (dateStr === new Date().toISOString().split('T')[0]);
             let badges = '';
             for (let s of dSess) badges += `<div class="day-badge badge-session" title="${s.case_status}" onclick="event.stopPropagation(); openRescheduleModal('${s.id}')">⚖️ جلسة ${s.session_date.slice(11, 16)}</div>`;
@@ -1679,8 +1686,11 @@ window.showDayDetails = async function(dateStr) {
         let tasks = await db.tasks.where('date').equals(dateStr).toArray();
         let html = `<h6 class="gold-text"><i class="bi bi-briefcase"></i> الجلسات</h6>`;
         if (sessions.length === 0) html += `<p class="small text-muted">لا يوجد</p>`;
+        const dayCaseIds = [...new Set(sessions.map(s => String(s.case_id)).filter(Boolean))];
+        const dayCaseRows = dayCaseIds.length ? await db.cases.bulkGet(dayCaseIds) : [];
+        const dayCaseMap = new Map((dayCaseRows || []).filter(Boolean).map(c => [String(c.id), c]));
         for (let s of sessions) {
-            const c = await db.cases.get(s.case_id);
+            const c = dayCaseMap.get(String(s.case_id));
             html += `<div class="p-2 mb-2 bg-dark rounded border border-danger cursor-pointer" onclick="hideModal('dayModal'); openAgendaSession('${s.id}')">${c?.client_name || 'غير معروف'} - ${s.case_status} <button class="btn btn-sm btn-outline-warning ms-2" onclick="event.stopPropagation(); openRescheduleModal('${s.id}')">ترحيل</button></div>`;
         }
         html += `<hr class="border-secondary"><h6 class="gold-text"><i class="bi bi-calendar-event"></i> الأحداث</h6>`;
@@ -2718,7 +2728,7 @@ async function loadRecentCases() {
     } catch (e) { console.error(e); }
 }
 window.clearBasicSearch = function() { const input=document.getElementById('searchInput'); if (input) input.value=''; const out=document.getElementById('searchResults'); if (out) out.innerHTML=''; };
-window.searchCases = async function() { const q = document.getElementById('searchInput').value.trim().toLowerCase(); if (!q) { clearBasicSearch(); return; } try { const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).filter(c => isMJCaseCode(c.case_code || c.main_file_code)).filter(c => String(c.client_name || '').toLowerCase().includes(q) || String(c.case_number || '').includes(q) || String(c.client_phone || '').includes(q) || String(c.case_code || '').toLowerCase().includes(q)).toArray(); let html = ''; for (let c of cases) { const sessions = await db.sessions.where('case_id').equals(c.id).toArray(); sessions.sort((a, b) => new Date(b.session_date) - new Date(a.session_date)); const lastStatus = sessions.length > 0 ? sessions[0].case_status : 'جديدة'; html += `<div class="col-md-4"><div class="case-card" onclick="openCaseDetails('${c.id}')"><div class="d-flex justify-content-between align-items-start"><div><h5 class="gold-text mb-1">${c.client_name}</h5><p class="mb-0 text-white-50 small">كود: ${c.case_code}</p></div><span class="case-status status-new">${lastStatus}</span></div><p class="mb-0 text-white-50 mt-2">رقم: ${c.case_number}/${c.case_year}</p></div></div>`; } document.getElementById('searchResults').innerHTML = html || '<div class="col-12 text-center text-muted">لا توجد نتائج</div>'; } catch (e) { } };
+window.searchCases = async function() { const q = document.getElementById('searchInput').value.trim().toLowerCase(); if (!q) { clearBasicSearch(); return; } try { const cases = await db.cases.filter(c => !c.archived && c.office_id === currentOfficeId).filter(c => isMJCaseCode(c.case_code || c.main_file_code)).filter(c => String(c.client_name || '').toLowerCase().includes(q) || String(c.case_number || '').includes(q) || String(c.client_phone || '').includes(q) || String(c.case_code || '').toLowerCase().includes(q)).toArray(); const caseIds = cases.map(c => c.id); const allSessions = caseIds.length ? await db.sessions.where('case_id').anyOf(caseIds).toArray() : []; const sessionsByCase = new Map(); for (const session of allSessions) { const key = String(session.case_id); if (!sessionsByCase.has(key)) sessionsByCase.set(key, []); sessionsByCase.get(key).push(session); } let html = ''; for (let c of cases) { const sessions = sessionsByCase.get(String(c.id)) || []; sessions.sort((a, b) => new Date(b.session_date) - new Date(a.session_date)); const lastStatus = sessions.length > 0 ? sessions[0].case_status : 'جديدة'; html += `<div class="col-md-4"><div class="case-card" onclick="openCaseDetails('${c.id}')"><div class="d-flex justify-content-between align-items-start"><div><h5 class="gold-text mb-1">${c.client_name}</h5><p class="mb-0 text-white-50 small">كود: ${c.case_code}</p></div><span class="case-status status-new">${lastStatus}</span></div><p class="mb-0 text-white-50 mt-2">رقم: ${c.case_number}/${c.case_year}</p></div></div>`; } document.getElementById('searchResults').innerHTML = html || '<div class="col-12 text-center text-muted">لا توجد نتائج</div>'; } catch (e) { } };
 
 // ========== البحث الحي الموحّد (D1) ==========
 // يبحث فوراً في الملفات والقضايا والملفات المهنية والجلسات والمهام والأحداث وملاحظات الفريق.
