@@ -6,7 +6,7 @@
   "homepage": "https://example.com",
   "scripts": {
     "start": "electron .",
-    "test": "node test/mj-finance.test.js && node test/ui-regressions.test.js && node test/dashboard-portal.test.js && node test/print-form.test.js",
+    "test": "node test/mj-finance.test.js && node test/ui-regressions.test.js && node test/dashboard-portal.test.js && node test/print-form.test.js && node test/user-requirements.test.js",
     "test:static": "node test/comprehensive-static.test.js",
     "test:electron": "bash test/run-electron-smoke.sh",
     "test:comprehensive": "npm test && npm run test:static && npm run test:electron",

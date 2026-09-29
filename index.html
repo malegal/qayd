@@ -58,7 +58,7 @@
 
         /* بطاقات القضايا */
         .cases-container { display: flex; gap: 1.5rem; flex-wrap: wrap; }
-        .cases-list { flex: 1.25; min-width: 300px; }
+        .cases-list { flex: 1; min-width: 300px; }
         .case-detail-panel { flex: 2; min-width: 380px; background: #ffffff; border-radius: 1rem; padding: 1rem; border: 1px solid var(--border-color); height: fit-content; position: sticky; top: 20px; }
         .case-card-item { background: #ffffff; border: 1px solid var(--border-color); border-radius: 0.8rem; padding: 0.8rem; margin-bottom: 0.8rem; cursor: pointer; transition: 0.2s; }
         .case-card-item:hover, .case-card-item.active { background: rgba(190,145,36,0.10); border-color: var(--gold-solid); }
@@ -176,6 +176,8 @@
 .agenda-layout { display:grid; grid-template-columns:minmax(0,1fr) 330px; gap:1rem; align-items:start; }
 .agenda-month-list { max-height:620px; overflow:auto; }
 .agenda-month-item { border-right:4px solid var(--gold); background:#fff; border-radius:10px; padding:.7rem; margin-bottom:.65rem; box-shadow:0 3px 10px rgba(18,51,91,.06); }
+.agenda-month-item { font-family:"Amiri", serif; color:#8a6814; font-size:1.04rem; }
+.agenda-month-item .small, .agenda-month-item .badge { font-family:"Tajawal", sans-serif; }
 .agenda-month-item .date { color:var(--gold-dark,#8a6814); font-weight:900; }
 .case-form-section { border:1px solid var(--border); border-radius:12px; padding:1rem; background:#fbfdff; }
 .case-form-section-title { color:var(--navy); font-weight:900; border-bottom:1px solid var(--border); padding-bottom:.5rem; margin-bottom:.8rem; }
@@ -379,7 +381,7 @@
             <div class="tab-pane fade" id="financeTab" role="tabpanel">
                 <div class="page-heading"><div><h3>الدفتر المالي الموحد</h3><p>حساب مستقل للمكتب، ولكل قضية أو ملف، مع عرض المتحصلات والمصروفات وصافي الحساب.</p></div><div class="d-flex gap-2"><button class="gold-btn" onclick="openOfficeExpenseModal()"><i class="bi bi-wallet2"></i> تسجيل مصروف مكتب</button><button class="btn btn-outline-primary" onclick="showTab('cases'); openNewSessionShortcut()"><i class="bi bi-calendar-plus"></i> جلسة جديدة</button></div></div>
                 <div class="finance-summary-grid mb-4"><div class="finance-summary-card"><span>إجمالي العمليات</span><strong id="financePageFees">0.00</strong></div><div class="finance-summary-card success"><span>إجمالي المتحصلات</span><strong id="financePageCollected">0.00</strong></div><div class="finance-summary-card danger"><span>إجمالي المصروفات</span><strong id="financePageExpenses">0.00</strong></div><div class="finance-summary-card primary"><span>صافي الحساب</span><strong id="financePageProfit">0.00</strong></div></div>
-                <div class="finance-toolbar"><input id="financeSearchInput" class="form-control" placeholder="بحث بالاسم أو رقم القضية أو كود الملف..." oninput="filterFinancePage()"><select id="financeTypeFilter" class="form-select" onchange="filterFinancePage()"><option value="">كل الملفات</option><option value="judicial">ملفات قضائية</option><option value="professional">ملفات إجرائية وخدمية</option><option value="office">حساب المكتب</option></select><button class="navy-btn" onclick="loadFinancePage()"><i class="bi bi-arrow-repeat"></i> تحديث</button></div>
+                <div class="finance-toolbar"><input id="financeSearchInput" class="form-control" placeholder="بحث بالاسم أو رقم القضية أو كود الملف..." oninput="filterFinancePage()"><select id="financeTypeFilter" class="form-select" onchange="filterFinancePage()"><option value="">كل الملفات</option><option value="judicial">ملفات المحكمة</option><option value="professional">ملفات إجرائية وخدمية</option><option value="office">حساب المكتب</option></select><button class="navy-btn" onclick="loadFinancePage()"><i class="bi bi-arrow-repeat"></i> تحديث</button></div>
                 <div class="table-responsive"><table class="table finance-table align-middle"><thead><tr><th>العميل</th><th>الملف</th><th>المحكمة/الخدمة</th><th>الأتعاب</th><th>المتحصل</th><th>المصروفات</th><th>صافي الربح</th><th>إجراء</th></tr></thead><tbody id="financeTableBody"></tbody></table></div>
             </div>
 
@@ -405,7 +407,7 @@
                         <div class="fm-toolbar">
                             <div class="fm-search-wrap">
                                 <i class="bi bi-search"></i>
-                                <input type="text" id="caseSearchInput" class="form-control" placeholder="بحث باسم العميل أو المحكمة أو رقم الملف..." onkeyup="filterCasesList()">
+                                <input type="text" id="caseSearchInput" class="form-control" placeholder="بحث باسم العميل أو المحكمة أو رقم الملف..." oninput="filterCasesList()">
                             </div>
                             <div class="fm-toolbar-actions">
                                 <button type="button" class="fm-icon-btn" id="fmViewCardsBtn" onclick="FMPro.setView('cards')" title="عرض بطاقات"><i class="bi bi-grid-3x3-gap-fill"></i></button>
@@ -486,21 +488,7 @@
                         </div>
                         <div id="casesListContainer" style="max-height: 65vh; overflow-y: auto;"></div>
                     </div>
-                    <aside class="case-detail-panel" id="caseDetailPanel" aria-live="polite">
-                        <div class="d-flex justify-content-between align-items-center mb-3">
-                            <h5 class="gold-text mb-0">ملف القضية</h5>
-                            <span class="small text-muted">اختر من القائمة</span>
-                        </div>
-                        <div id="caseDetailDataSection" class="case-panel-section">
-                            <div id="caseDetailContent">اختر قضية لعرض التفاصيل</div>
-                        </div>
-                        <div id="caseDetailSessionsSection" class="case-panel-section" style="display:none">
-                            <h6 class="gold-text mb-2"><i class="bi bi-calendar-check"></i> الجلسات</h6>
-                            <div id="caseDetailSessions" style="max-height: 360px; overflow-y: auto;">لا توجد جلسات</div>
-                        </div>
-                        <hr class="border-secondary">
-                        <div class="case-panel-actions" id="caseActionsPanel"></div>
-                    </aside>
+                    <!-- عرض بيانات القضية صار في نافذة منبثقة (caseDetailModal) تفتح من أي تبويب. -->
                 </div>
             </div>
 
@@ -623,6 +611,25 @@
      فكان Bootstrap يضيف طبقة .modal-backdrop المعتمة على الصفحة كاملة بينما
      يبقى صندوق المودال غير مرئي (0×0)، فلا يستجيب النقر ولا الكتابة. -->
 
+<!-- نافذة بيانات الملف/القضية الموحدة: تفتح عند النقر على أي ملف من أي تبويب (الأجندة، إدارة الملفات، البحث، الأرشيف). -->
+<div class="modal fade" id="caseDetailModal" tabindex="-1" aria-labelledby="caseDetailModalTitle">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title gold-text" id="caseDetailModalTitle"><i class="bi bi-folder2-open"></i> ملف القضية</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="إغلاق"></button></div>
+        <div class="modal-body" id="caseDetailPanel" aria-live="polite">
+            <div id="caseDetailDataSection" class="case-panel-section">
+                <div id="caseDetailContent">اختر قضية لعرض التفاصيل</div>
+            </div>
+            <div id="caseDetailSessionsSection" class="case-panel-section mt-3">
+                <h6 class="gold-text mb-2"><i class="bi bi-calendar-check"></i> تسلسل الجلسات والقرارات</h6>
+                <div id="caseDetailSessions">لا توجد جلسات</div>
+            </div>
+        </div>
+        <div class="modal-footer d-block">
+            <div class="case-panel-actions" id="caseActionsPanel"></div>
+        </div>
+    </div></div>
+</div>
+
 <!-- مودال البحث المتقدم -->
 <div class="modal fade" id="advancedSearchModal" tabindex="-1">
     <div class="modal-dialog modal-xl"><div class="modal-content">
@@ -651,7 +658,7 @@
 <div class="modal fade" id="addCaseModal" tabindex="-1">
     <div class="modal-dialog modal-xl">
         <div class="modal-content">
-            <div class="modal-header"><h5 class="modal-title gold-text"><i class="bi bi-folder-plus"></i> ملف قضائي جديد</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-header"><h5 class="modal-title gold-text"><i class="bi bi-folder-plus"></i> ملف جديد</h5><button type="button" class="btn btn-sm btn-outline-info ms-auto me-2" onclick="hideModal('addCaseModal'); setTimeout(() => QMF.openServiceCreateModal(), 250)"><i class="bi bi-list-check"></i> ملف خدمي / إجرائي (غير قضائي)</button><button type="button" class="btn-close ms-0" data-bs-dismiss="modal"></button></div>
             <div class="modal-body">
                 <form id="caseFormModal">
                     <!-- القسم 1: بيانات العملاء -->
@@ -699,7 +706,7 @@
                         <div class="row g-3">
                             <div class="col-md-4"><label>المرحلة</label><select id="case_stage" class="form-select"><option value="first_instance">أول درجة</option><option value="appeal">استئناف</option><option value="retrial">التماس إعادة نظر</option><option value="cassation">طعن بالنقض</option><option value="enforcement">تنفيذ</option><option value="opposition">معارضة</option><option value="execution_objection">إشكال تنفيذ</option></select></div>
                             <div class="col-md-2"><label>رقم القضية</label><input id="case_number" class="form-control" required></div>
-                            <div class="col-md-2"><label>السنة</label><input id="case_year" class="form-control" required></div>
+                            <div class="col-md-2"><label>السنة</label><input id="case_year" type="text" inputmode="text" autocomplete="off" class="form-control" required></div>
                             <div class="col-md-4"><label>المحكمة</label><select id="court_name" class="form-select" required><option value="">اختر المحكمة...</option><option>محكمة الأسرة</option><option>المحكمة الجزئية</option><option>المحكمة الابتدائية</option><option>محكمة الاستئناف</option><option>المحكمة العمالية</option><option>المحكمة الاقتصادية</option><option>المحكمة الادارية</option><option>محكمة القضاء الاداري</option><option>المحكمة الادارية العليا</option><option>محكمة النقض</option></select></div>
                             <div class="col-md-3"><label>الدائرة</label><input id="circuit" class="form-control"></div>
                             <div class="col-md-3"><label>المدينة</label><input id="case_city" class="form-control"></div>
@@ -929,7 +936,7 @@
 <!-- سجل إجراء مستقل للملفات الإجرائية والخدمية؛ يشبه الجلسة في الملف القضائي دون خلط النوعين. -->
 <div class="modal fade" id="professionalActionModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title gold-text">إضافة إجراء أو موعد</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><label class="form-label">تاريخ الإجراء</label><input type="date" id="professionalActionDate" class="form-control mb-2"><label class="form-label">ما تم</label><textarea id="professionalActionDone" class="form-control mb-2" rows="2" placeholder="وصف الإجراء أو الموعد الذي تم"></textarea><label class="form-label">الإجراء القادم</label><textarea id="professionalActionNext" class="form-control mb-2" rows="2" placeholder="ما سوف يتم بعد ذلك"></textarea><label class="form-label">موعد الإجراء القادم</label><input type="date" id="professionalActionNextDate" class="form-control"></div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button><button class="gold-btn" onclick="saveProfessionalAction()">حفظ الإجراء</button></div></div></div></div>
 
-<!-- واجهة الملفات المهنية: منفصلة عن واجهة الملفات القضائية مع تجربة استخدام موحدة. -->
+<!-- واجهة الملفات المهنية: منفصلة عن واجهة ملفات المحكمة مع تجربة استخدام موحدة. -->
 <div class="modal fade" id="professionalFileModal" tabindex="-1">
   <div class="modal-dialog modal-lg"><div class="modal-content">
     <div class="modal-header"><h5 class="modal-title gold-text" id="professionalFileModalTitle"><i class="bi bi-briefcase"></i> إنشاء ملف خدمة مهنية</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
@@ -1116,7 +1123,6 @@ table.fm-table tbody tr.fm-row-overdue td:first-child { box-shadow: inset 4px 0 
 <div class="modal fade" id="teamManagementModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title gold-text">إدارة فريق المكتب</h5></div><div class="modal-body"><label>البريد أو الهاتف</label><input id="teamInviteContact" class="form-control mb-3" placeholder="member@example.com"><label>الدور</label><select id="teamInviteRole" class="form-select mb-3"><option value="lawyer">محامي</option><option value="staff">سكرتيرة</option><option value="accountant">محاسب</option></select><button class="gold-btn w-100" onclick="createDesktopInvite()">إنشاء كود الدعوة</button><div id="teamInviteResult" class="text-center fw-bold mt-3"></div><hr><button class="btn btn-outline-warning w-100" onclick="createDesktopRecoveryCodes()">إنشاء رموز استرداد المالك</button><pre id="teamRecoveryResult" class="mt-3"></pre></div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button></div></div></div></div>
     <script src="qayd-finance.js"></script>
     <script src="renderer.js"></script>
-<script src="qayd-stages-patch.js"></script>
 <script src="qayd-main-file.js"></script>
 <!-- ملاحظات فريق المكتب مرتبطة بالقضية وتُزامن مع public.notes. -->
 <div class="modal fade" id="teamNotesModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5 class="modal-title gold-text"><i class="bi bi-journal-text"></i> ملاحظات فريق المكتب</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><textarea id="teamNoteContent" class="form-control mb-3" rows="4" placeholder="اكتب ملاحظة لسير العمل داخل المكتب..."></textarea><button class="gold-btn w-100 mb-3" onclick="saveTeamNote()">حفظ الملاحظة</button><div id="teamNotesList" class="border rounded p-2"></div></div></div></div></div>

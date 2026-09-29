@@ -106,7 +106,7 @@ for (const [label, source, symbols] of [
   });
 }
 test('all project JavaScript files pass Node syntax validation', () => {
-  for (const file of ['main.js', 'preload.js', 'renderer.js', 'qayd-finance.js', 'qayd-main-file.js', 'qayd-stages-patch.js']) {
+  for (const file of ['main.js', 'preload.js', 'renderer.js', 'qayd-finance.js', 'qayd-main-file.js']) {
     execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
   }
 });

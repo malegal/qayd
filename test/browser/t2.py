@@ -1,0 +1,27 @@
+from lib import *
+with sync_playwright() as p:
+    b, page, logs = launch(p)
+    page.evaluate(SEED)
+    page.evaluate("showTab('cases')"); page.evaluate("loadCasesList()"); page.wait_for_timeout(600)
+    print('open-main-files buttons:', page.evaluate("Array.from(document.querySelectorAll('button')).filter(b=>b.textContent.includes('فتح الملفات الرئيسية')).map(b=>b.closest('div')?.className+'|'+b.getAttribute('onclick'))"))
+    print('cards:', page.evaluate("document.querySelectorAll('#casesListContainer .fm-card, #casesListContainer .case-card-item, #casesListContainer tr').length"))
+    print('list text:', page.evaluate("document.getElementById('casesListContainer').innerText.replace(/\\n+/g,' | ').slice(0,300)"))
+    # search
+    page.fill('#caseSearchInput','سارة'); page.wait_for_timeout(300)
+    print('after search سارة:', page.evaluate("document.getElementById('casesListContainer').innerText.replace(/\\n+/g,' | ').slice(0,200)"))
+    page.fill('#caseSearchInput','123'); page.dispatch_event('#caseSearchInput','keyup'); page.wait_for_timeout(300)
+    print('after search 123:', page.evaluate("document.getElementById('casesListContainer').innerText.replace(/\\n+/g,' | ').slice(0,200)"))
+    page.fill('#caseSearchInput','')
+    page.evaluate("FMPro.toggleAdvancedFilters()")
+    print('court options:', page.evaluate("Array.from(document.querySelectorAll('#courtFilter option')).map(o=>o.textContent)"))
+    print('status options:', page.evaluate("Array.from(document.querySelectorAll('#fmFilterStatus option')).map(o=>o.textContent)"))
+    page.select_option('#courtFilter', label='محكمة الأسرة'); page.wait_for_timeout(300)
+    print('after court filter:', page.evaluate("document.getElementById('casesListContainer').innerText.replace(/\\n+/g,' | ').slice(0,200)"))
+    page.select_option('#courtFilter', index=0)
+    # click main file
+    page.evaluate("window.__modalLog.length=0")
+    page.evaluate("QMF.openDetails('lf1')"); page.wait_for_timeout(600)
+    print('modalLog:', page.evaluate("window.__modalLog"))
+    print('QMF body:', page.evaluate("document.getElementById('qmfDetailsBody').innerText.replace(/\\n+/g,' | ').slice(0,900)"))
+    print('--- errors'); print('\n'.join(l for l in logs if 'error' in l.lower())[:1500])
+    b.close()

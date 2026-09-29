@@ -38,7 +38,8 @@ def call(method, params=None):
         if result.get("id") == seq:
             return result
 
-call("Page.navigate", {"url": "file:///home/ubuntu/qayd/index.html"})
+app_root = Path(__file__).resolve().parents[1]
+call("Page.navigate", {"url": (app_root / "index.html").as_uri()})
 time.sleep(1)
 call("Runtime.enable")
 
@@ -51,6 +52,13 @@ def evaluate(expression):
     if "exceptionDetails" in result.get("result", {}):
         raise RuntimeError(result["result"]["exceptionDetails"])
     return remote.get("value")
+
+for _ in range(30):
+    if evaluate("typeof window.showTab === 'function'"):
+        break
+    time.sleep(.2)
+else:
+    fail("renderer.js did not finish loading")
 
 for _ in range(30):
     try:
@@ -76,7 +84,7 @@ if not initial["welcome"]: fail("welcome identity text is missing")
 print("PASS first-launch welcome screen")
 
 # Test 2: exercise every operational area with an empty local office.
-area_result = evaluate("""(async()=>{
+area_result = evaluate("""(async()=>{try{
   window.__qaydTestErrors=[];
   window.addEventListener('error', e=>window.__qaydTestErrors.push(e.message));
   window.addEventListener('unhandledrejection', e=>window.__qaydTestErrors.push(String(e.reason?.message||e.reason)));
@@ -89,13 +97,17 @@ area_result = evaluate("""(async()=>{
     if(id==='financeTab') await loadFinancePage();
     if(id==='archiveTab') await loadArchivedCases();
     if(id==='searchTab') await loadStats();
-    showTab(id);
+    window.showTab(id);
     await new Promise(r=>setTimeout(r,80));
+    window.showTab(id);
     const el=document.getElementById(id), rect=el.getBoundingClientRect();
     checks.push({id,display:getComputedStyle(el).display,width:rect.width,height:rect.height,visible:rect.width>0&&rect.height>0});
   }
   return {checks,errors:window.__qaydTestErrors};
+  }catch(e){return {checks:[],errors:[String(e?.stack||e)]};}
 })()""")
+if not area_result or "checks" not in area_result:
+    fail(f"operational areas returned no result: {area_result}")
 for check in area_result["checks"]:
     if not check["visible"]: fail(f"area {check['id']} is not visible: {check}")
 if area_result["errors"]: fail(f"runtime errors while opening areas: {area_result['errors']}")
