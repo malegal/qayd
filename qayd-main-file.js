@@ -89,6 +89,11 @@
   function normCode(s) { return String(s == null ? '' : s).toUpperCase().replace(/[^A-Z0-9]/g, ''); }
   function nowIso() { return new Date().toISOString(); }
   function stageLabel(kind) { return (STAGE_KINDS[kind] && STAGE_KINDS[kind].label) || kind || 'درجة تقاضٍ غير محددة'; }
+  function caseReference(number, year) {
+    if (typeof window.formatCaseReference === 'function') return window.formatCaseReference(number, year);
+    const n = String(number || '').trim(); const y = String(year || '').trim();
+    return n && y ? `${n} لسنة ${y}` : (n || y || '—');
+  }
   function fileTypeLabel(t) { return (FILE_TYPES[t] && FILE_TYPES[t].label) || t || 'ملف'; }
   function categoryOf(t) { return (FILE_TYPES[t] && FILE_TYPES[t].category) || 'general'; }
   function isJudicialType(t) { return categoryOf(t) === 'judicial'; }
@@ -812,7 +817,7 @@
             <span class="qmf-badge ${isCurrent ? 'professional' : 'general'}">${isCurrent ? 'الحالية' : 'سابقة'}</span>
           </div>
           <div class="qmf-stage-grid">
-            <div><b>رقم القضية:</b> ${esc(s.case_number || '—')}${s.case_year ? '/' + esc(s.case_year) : ''}</div>
+            <div><b>رقم القضية:</b> ${esc(caseReference(s.case_number, s.case_year))}</div>
             <div><b>المحكمة:</b> ${esc(s.court_name || '—')}</div>
             <div><b>الدائرة:</b> ${esc(s.circuit || '—')}</div>
             <div><b>المدينة:</b> ${esc(s.city || '—')}</div>
@@ -868,7 +873,7 @@
       <div class="qmf-file-details-grid mb-3">
         <div class="record-row"><b>عنوان الملف:</b><span>${esc(file.title || '—')}</span></div>
         <div class="record-row"><b>الموضوع:</b><span>${esc((stages[0] || {}).case_subject || file.description || '—')}</span></div>
-        <div class="record-row"><b>رقم القضية:</b><span>${esc((stages[0] || {}).case_number || '—')}${(stages[0] || {}).case_year ? '/' + esc((stages[0] || {}).case_year) : ''}</span></div>
+        <div class="record-row"><b>رقم القضية:</b><span>${esc(caseReference((stages[0] || {}).case_number, (stages[0] || {}).case_year))}</span></div>
         <div class="record-row"><b>المحكمة:</b><span>${esc((stages[0] || {}).court_name || '—')}</span></div>
         <div class="record-row"><b>العميل:</b><span>${esc(file.client_name || (stages[0] || {}).client_name || '—')}</span></div>
         <div class="record-row"><b>صفته:</b><span>${esc(file.client_role || (stages[0] || {}).client_role || '—')}</span></div>
@@ -1030,7 +1035,7 @@
       await db.legalFiles.update(file.id, { updated_at: now, status: 'in_progress' });
 
       if (typeof hideModal === 'function') hideModal('qmfStageModal');
-      if (Swal) Swal.fire({ icon: 'success', title: 'تمت إضافة المرحلة', html: `<div style="text-align:right;"><p><b>النوع:</b> ${stageLabel(kind)}</p><p><b>الرقم:</b> ${stage.case_number || '—'}/${stage.case_year || ''}</p></div>`, timer: 2800, showConfirmButton: false, background: '#0f172a', color: '#fff' });
+      if (Swal) Swal.fire({ icon: 'success', title: 'تمت إضافة المرحلة', html: `<div style="text-align:right;"><p><b>النوع:</b> ${stageLabel(kind)}</p><p><b>الرقم:</b> ${caseReference(stage.case_number, stage.case_year)}</p></div>`, timer: 2800, showConfirmButton: false, background: '#0f172a', color: '#fff' });
 
       if (typeof window.loadCasesList === 'function') { try { await window.loadCasesList(); } catch (e) {} }
       if (typeof window.updatePendingBadge === 'function') window.updatePendingBadge();
@@ -1188,7 +1193,7 @@
       const payments = await db.payments.where('case_id').equals(s.id).toArray().catch(() => []);
       const expenses = await db.expenses.where('case_id').equals(s.id).toArray().catch(() => []);
       grandTotal += Number(fee.total || 0); grandPaid += Number(fee.paid || 0);
-      rows += `<tr><td>${esc(stageLabel(s.stage_kind))}</td><td>${esc(s.case_number || '—')}/${esc(s.case_year || '')}</td><td>${Number(fee.total || 0).toFixed(2)}</td><td>${Number(fee.paid || 0).toFixed(2)}</td><td>${Number(fee.remaining || 0).toFixed(2)}</td></tr>`;
+      rows += `<tr><td>${esc(stageLabel(s.stage_kind))}</td><td>${esc(caseReference(s.case_number, s.case_year))}</td><td>${Number(fee.total || 0).toFixed(2)}</td><td>${Number(fee.paid || 0).toFixed(2)}</td><td>${Number(fee.remaining || 0).toFixed(2)}</td></tr>`;
       if (stageId) {
         details.push({ stage: s, payments, expenses, fee });
       }
@@ -1228,7 +1233,7 @@
       let body = `<div class="stage-block">
         <h3>${esc(stageLabel(s.stage_kind))}</h3>
         <div class="kv"><b>الرقم الإداري:</b> ${esc(file.file_code)}</div>
-        <div class="kv"><b>رقم القضية:</b> ${esc(s.case_number || '—')}/${esc(s.case_year || '')}</div>
+        <div class="kv"><b>رقم القضية:</b> ${esc(caseReference(s.case_number, s.case_year))}</div>
         <div class="kv"><b>المحكمة:</b> ${esc(s.court_name || '—')} &nbsp; <b>الدائرة:</b> ${esc(s.circuit || '—')} &nbsp; <b>المدينة:</b> ${esc(s.city || '—')}</div>
         <div class="kv"><b>العميل:</b> ${esc(s.client_name || '')} ${s.client_role ? '(' + esc(s.client_role) + ')' : ''}</div>
         <div class="kv"><b>الخصم:</b> ${esc(s.opponent_name || '')} ${s.opponent_role ? '(' + esc(s.opponent_role) + ')' : ''}</div>
@@ -1262,7 +1267,7 @@
       const sessions = await db.sessions.where('case_id').equals(s.id).toArray().catch(() => []);
       body += `<div class="stage-block">
         <h3>${esc(stageLabel(s.stage_kind))}</h3>
-        <div class="kv"><b>رقم القضية:</b> ${esc(s.case_number || '—')}/${esc(s.case_year || '')} &nbsp; <b>المحكمة:</b> ${esc(s.court_name || '—')}</div>
+        <div class="kv"><b>رقم القضية:</b> ${esc(caseReference(s.case_number, s.case_year))} &nbsp; <b>المحكمة:</b> ${esc(s.court_name || '—')}</div>
         <div class="kv"><b>صفة العميل:</b> ${esc(s.client_role || '—')} &nbsp; <b>صفة الخصم:</b> ${esc(s.opponent_role || '—')}</div>
         <div class="kv"><b>الموضوع:</b> ${esc(s.case_subject || '—')} &nbsp; <b>الحالة:</b> ${esc(s.status || '—')}</div>
         ${s.judgment_summary ? `<div class="kv"><b>منطوق الحكم:</b> ${esc(s.judgment_summary)}</div>` : ''}
