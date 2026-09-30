@@ -88,7 +88,7 @@
   function digitsOnly(s) { return String(s == null ? '' : s).replace(/[^0-9]/g, ''); }
   function normCode(s) { return String(s == null ? '' : s).toUpperCase().replace(/[^A-Z0-9]/g, ''); }
   function nowIso() { return new Date().toISOString(); }
-  function stageLabel(kind) { return (STAGE_KINDS[kind] && STAGE_KINDS[kind].label) || kind || 'مرحلة'; }
+  function stageLabel(kind) { return (STAGE_KINDS[kind] && STAGE_KINDS[kind].label) || kind || 'درجة تقاضٍ غير محددة'; }
   function fileTypeLabel(t) { return (FILE_TYPES[t] && FILE_TYPES[t].label) || t || 'ملف'; }
   function categoryOf(t) { return (FILE_TYPES[t] && FILE_TYPES[t].category) || 'general'; }
   function isJudicialType(t) { return categoryOf(t) === 'judicial'; }
@@ -816,8 +816,6 @@
             <div><b>المحكمة:</b> ${esc(s.court_name || '—')}</div>
             <div><b>الدائرة:</b> ${esc(s.circuit || '—')}</div>
             <div><b>المدينة:</b> ${esc(s.city || '—')}</div>
-            <div><b>صفة العميل:</b> ${esc(s.client_role || '—')}</div>
-            <div><b>صفة الخصم:</b> ${esc(s.opponent_role || '—')}</div>
             <div><b>الحالة:</b> ${esc(s.status || '—')}</div>
             <div><b>الجلسات:</b> ${sessions.length}</div>
             <div><b>الأتعاب:</b> ${Number(fee.total || 0).toFixed(0)} (مدفوع ${Number(fee.paid || 0).toFixed(0)})</div>
@@ -884,7 +882,7 @@
         <div class="box"><div class="v text-danger">${agg.remaining.toFixed(0)}</div><div class="k">المتبقي</div></div>
       </div>
 
-      <div class="qmf-section-title"><i class="bi bi-diagram-3"></i> تطور الملف القضائي (${stages.length})</div>
+      <div class="qmf-section-title"><i class="bi bi-diagram-3"></i> تطور الملف القضائي${stages.length ? ` — ${stages.map(s => esc(stageLabel(s.stage_kind))).join(" · ")}` : ""}</div>
       ${stagesHtml || '<div class="qmf-empty">لا توجد مراحل بعد.</div>'}
       ${serviceHtml}
     `;
