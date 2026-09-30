@@ -146,6 +146,11 @@
     .qmf-stage .qmf-stage-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:5px 12px; margin-top:8px; font-size:.88rem; color:#1c2b3f; }
     .qmf-stage .qmf-stage-grid b { color:#53657d; font-weight:600; }
     .qmf-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    .qmf-file-details-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 12px; }
+    .qmf-file-details-grid .record-row { display:flex; justify-content:space-between; gap:12px; align-items:baseline; padding:9px 11px; border:1px solid #d9e1eb; border-radius:8px; background:#f8fafc; }
+    .qmf-file-details-grid .record-row b { color:#53657d; white-space:nowrap; }
+    .qmf-file-details-grid .record-row span { color:#1c2b3f; text-align:left; overflow-wrap:anywhere; }
+    .qmf-party-actions { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 4px; }
     .qmf-actions .btn { font-size:.82rem; }
     .qmf-judgment { background:#fff8e6; border:1px dashed #be9124; border-radius:8px; padding:8px 10px; margin-top:8px; color:#5b4610; font-size:.88rem; }
     .qmf-empty { text-align:center; color:#53657d; padding:26px; }
@@ -163,6 +168,7 @@
       .qmf-party { border:1px solid rgba(190,145,36,.35); border-radius:.6rem; padding:.6rem .8rem; }
       .qmf-party h6 { color:#be9124; font-weight:800; margin-bottom:.4rem; }
       .qmf-party-row { display:grid; gap:.15rem; font-size:.9rem; border-bottom:1px dashed rgba(128,128,128,.3); padding:.3rem 0; }
+      @media (max-width: 700px) { .qmf-file-details-grid { grid-template-columns:1fr; } .qmf-file-details-grid .record-row { align-items:flex-start; } }
       .qmf-case-meta { font-size:.9rem; margin:.4rem 0; }
       .qmf-sessions { display:flex; flex-direction:column; gap:.4rem; }
       .qmf-session-row { border-inline-start:3px solid #be9124; padding:.35rem .7rem; background:rgba(190,145,36,.06); border-radius:.4rem; }
@@ -791,23 +797,9 @@
       fee.paid = stagePayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
       fee.remaining = Math.max(0, Number(fee.total || 0) - fee.paid);
       const stageParties = await db.caseParties.where('case_id').equals(s.id).toArray().catch(() => []);
-      const partyBox = (title, list, fallback, withPoa) => {
-        const rows = list.length ? list : (fallback && fallback.name ? [fallback] : []);
-        if (!rows.length) return `<div class="qmf-party"><h6>${title}</h6><div class="text-muted small">—</div></div>`;
-        return `<div class="qmf-party"><h6>${title}</h6>${rows.map(p => `<div class="qmf-party-row">
-          <div><b>الاسم:</b> ${esc(p.name || '—')}</div>
-          <div><b>الهاتف:</b> ${esc(p.phone || '—')}</div>
-          <div><b>العنوان:</b> ${esc(p.address || '—')}</div>
-          <div><b>البريد:</b> ${esc(p.email || '—')}</div>
-          <div><b>الرقم القومي:</b> ${esc(p.national_id || p.nationalId || '—')}</div>
-          <div><b>الصفة:</b> ${esc(p.role || '—')}</div>
-          ${withPoa ? `<div><b>رقم التوكيل:</b> ${esc(p.power_of_attorney_number || '—')}${p.power_of_attorney_year ? ' / ' + esc(p.power_of_attorney_year) : ''}${p.notary_office ? ' — ' + esc(p.notary_office) : ''}</div>` : ''}
-        </div>`).join('')}</div>`;
-      };
-      const clientsHtml = partyBox('بيانات العميل', stageParties.filter(p => p.party_type === 'client'),
-        { name: s.client_name, phone: s.client_phone, address: s.client_address, email: s.client_email, national_id: s.client_national_id, role: s.client_role, power_of_attorney_number: s.client_power_number, power_of_attorney_year: s.client_power_year, notary_office: s.client_notary_office }, true);
-      const opponentsHtml = partyBox('بيانات الخصم', stageParties.filter(p => p.party_type === 'opponent'),
-        { name: s.opponent_name, phone: s.opponent_phone, address: s.opponent_address, email: s.opponent_email, national_id: s.opponent_national_id, role: s.opponent_role }, false);
+      const clientRows = stageParties.filter(p => p.party_type === 'client');
+      const opponentRows = stageParties.filter(p => p.party_type === 'opponent');
+      const partyButton = (kind, label, icon) => `<button class="btn btn-sm btn-outline-${kind === 'client' ? 'info' : 'danger'}" onclick="QMF.openPartyDetails('${s.id}','${kind}')"><i class="bi ${icon}"></i> ${label}</button>`;
       const sortedSessions = sessions.slice().sort((a, b) => String(a.session_date || '').localeCompare(String(b.session_date || '')));
       const sessionsHtml = sortedSessions.length ? `<div class="qmf-sessions">${sortedSessions.map((x, n) => `<div class="qmf-session-row">
           <div class="qmf-session-date"><span class="qmf-session-n">${n + 1}</span> ${esc(String(x.session_date || '').slice(0, 16).replace('T', ' '))} <span class="badge bg-secondary">${esc(x.case_status || 'جديدة')}</span> <button class="btn btn-sm btn-outline-warning py-0 float-end" onclick="QMF.editSession('${x.id}','${s.id}')" title="تعديل الجلسة"><i class="bi bi-pencil"></i></button></div>
@@ -830,18 +822,18 @@
             <div><b>الجلسات:</b> ${sessions.length}</div>
             <div><b>الأتعاب:</b> ${Number(fee.total || 0).toFixed(0)} (مدفوع ${Number(fee.paid || 0).toFixed(0)})</div>
           </div>
-          <div class="qmf-parties">${clientsHtml}${opponentsHtml}</div>
+          <div class="qmf-party-actions">${partyButton('client', 'بيانات العميل', 'bi-person-vcard')} ${partyButton('opponent', 'بيانات الخصم', 'bi-person-badge')}</div>
           <div class="qmf-case-meta"><b>نوع القضية:</b> ${esc(s.case_type || '—')} · <b>موضوع القضية:</b> ${esc(s.case_subject || '—')} · <b>عنوان الملف:</b> ${esc(s.case_title || file.title || '—')}</div>
           <div class="qmf-section-title"><i class="bi bi-calendar-check"></i> تسلسل الجلسات (${sortedSessions.length})</div>
           ${sessionsHtml}
           ${s.judgment_summary ? `<div class="qmf-judgment"><b>منطوق الحكم:</b> ${esc(s.judgment_summary)}${s.judgment_date ? ' — ' + esc(s.judgment_date) : ''}</div>` : ''}
           <div class="qmf-actions">
-            <button class="btn btn-sm btn-outline-info" onclick="QMF.openStage('${s.id}')"><i class="bi bi-box-arrow-up-left"></i> فتح المرحلة</button>
+            <button class="btn btn-sm btn-outline-info" onclick="QMF.openStage('${s.id}')"><i class="bi bi-box-arrow-up-left"></i> فتح درجة التقاضي</button>
             <button class="btn btn-sm btn-outline-warning" onclick="QMF.editStage('${s.id}')"><i class="bi bi-pencil-square"></i> تعديل بيانات القضية والعملاء</button>
-            <button class="btn btn-sm btn-outline-danger" onclick="QMF.deleteStage('${s.id}')"><i class="bi bi-trash"></i> حذف المرحلة</button>
-            <button class="btn btn-sm btn-success" onclick="QMF.openStageFees('${s.id}','${file.id}')"><i class="bi bi-cash-coin"></i> أتعاب المرحلة</button>
-            <button class="btn btn-sm btn-outline-warning" onclick="QMF.printFees('${file.id}','${s.id}')"><i class="bi bi-printer"></i> طباعة أتعاب المرحلة</button>
-            <button class="btn btn-sm btn-outline-primary" onclick="QMF.printData('${file.id}','${s.id}')"><i class="bi bi-file-earmark-text"></i> طباعة بيانات المرحلة</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="QMF.deleteStage('${s.id}')"><i class="bi bi-trash"></i> حذف درجة التقاضي</button>
+            <button class="btn btn-sm btn-success" onclick="QMF.openStageFees('${s.id}','${file.id}')"><i class="bi bi-cash-coin"></i> أتعاب درجة التقاضي</button>
+            <button class="btn btn-sm btn-outline-warning" onclick="QMF.printFees('${file.id}','${s.id}')"><i class="bi bi-printer"></i> طباعة أتعاب درجة التقاضي</button>
+            <button class="btn btn-sm btn-outline-primary" onclick="QMF.printData('${file.id}','${s.id}')"><i class="bi bi-file-earmark-text"></i> طباعة بيانات درجة التقاضي</button>
           </div>
         </div>`;
     }
@@ -856,22 +848,14 @@
       </div></div>`).join('')}` : '';
 
     const body = `
-      <div class="qmf-file-summary border rounded p-3 mb-3">
-        <div><b>رقم الملف في المكتب:</b> ${esc(file.file_code || '—')}</div>
-        <div><b>اسم العميل:</b> ${esc(file.client_name || (stages[0] || {}).client_name || '—')}</div>
-        <div><b>اسم الخصم:</b> ${esc(file.opponent_name || (stages[0] || {}).opponent_name || '—')}</div>
-        <div><b>عنوان الملف:</b> ${esc(file.title || '—')}</div>
-        <div><b>موضوع القضية:</b> ${esc((stages[0] || {}).case_subject || file.description || '—')}</div>
-        <div><b>نوع القضية:</b> ${esc((stages[0] || {}).case_type || fileTypeLabel(file.file_type) || '—')}</div>
-      </div>
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
         <div>
-          <div class="qmf-code" style="font-size:1.3rem;color:#f0c14b;font-weight:900;">${esc(file.file_code)}</div>
+          <div class="qmf-code" style="font-size:1.3rem;color:#f0c14b;font-weight:900;">رقم الملف في المكتب: ${esc(file.file_code || '—')}</div>
           <div class="mt-1"><span class="qmf-badge ${cat}">${esc(CATEGORY_LABELS[cat] || '')} · ${esc(fileTypeLabel(file.file_type))}</span>
           <span class="badge bg-secondary ms-1">${esc(STATUS_LABELS[file.status] || file.status || '')}</span></div>
         </div>
         <div class="qmf-actions">
-          ${cat === 'judicial' ? `<button class="btn btn-sm gold-btn" onclick="QMF.openAddStage('${file.id}')"><i class="bi bi-plus-lg"></i> إضافة مرحلة</button>` : `<button class="btn btn-sm gold-btn" onclick="QMF.convertToJudicial('${file.id}')"><i class="bi bi-arrow-repeat"></i> تحويل إلى ملف قضائي</button>`}
+          ${cat === 'judicial' ? `<button class="btn btn-sm gold-btn" onclick="QMF.openAddStage('${file.id}')"><i class="bi bi-plus-lg"></i> إضافة درجة تقاضٍ</button>` : `<button class="btn btn-sm gold-btn" onclick="QMF.convertToJudicial('${file.id}')"><i class="bi bi-arrow-repeat"></i> تحويل إلى ملف قضائي</button>`}
           <button class="btn btn-sm btn-outline-success" onclick="QMF.addSessionForFile('${file.id}')"><i class="bi bi-calendar-plus"></i> إضافة جلسة</button>
           <button class="btn btn-sm btn-outline-warning" onclick="QMF.rescheduleFileSession('${file.id}')"><i class="bi bi-calendar-event"></i> ترحيل جلسة</button>
           <button class="btn btn-sm btn-success" onclick="QMF.openFileFees('${file.id}')"><i class="bi bi-cash-stack"></i> إدارة أتعاب الملف</button>
@@ -883,11 +867,15 @@
         </div>
       </div>
 
-      <div class="row g-2 mb-2">
-        <div class="col-md-6"><div class="record-row"><b>العنوان:</b> ${esc(file.title || '—')}</div></div>
-        <div class="col-md-6"><div class="record-row"><b>العميل:</b> ${esc(file.client_name || '—')} ${file.client_role ? '· ' + esc(file.client_role) : ''}</div></div>
-        <div class="col-md-6"><div class="record-row"><b>الخصم:</b> ${esc(file.opponent_name || '—')} ${file.opponent_role ? '· ' + esc(file.opponent_role) : ''}</div></div>
-        <div class="col-md-6"><div class="record-row"><b>الهاتف:</b> ${esc(file.client_phone || '—')}</div></div>
+      <div class="qmf-file-details-grid mb-3">
+        <div class="record-row"><b>عنوان الملف:</b><span>${esc(file.title || '—')}</span></div>
+        <div class="record-row"><b>الموضوع:</b><span>${esc((stages[0] || {}).case_subject || file.description || '—')}</span></div>
+        <div class="record-row"><b>رقم القضية:</b><span>${esc((stages[0] || {}).case_number || '—')}${(stages[0] || {}).case_year ? '/' + esc((stages[0] || {}).case_year) : ''}</span></div>
+        <div class="record-row"><b>المحكمة:</b><span>${esc((stages[0] || {}).court_name || '—')}</span></div>
+        <div class="record-row"><b>العميل:</b><span>${esc(file.client_name || (stages[0] || {}).client_name || '—')}</span></div>
+        <div class="record-row"><b>صفته:</b><span>${esc(file.client_role || (stages[0] || {}).client_role || '—')}</span></div>
+        <div class="record-row"><b>الخصم:</b><span>${esc(file.opponent_name || (stages[0] || {}).opponent_name || '—')}</span></div>
+        <div class="record-row"><b>صفته:</b><span>${esc(file.opponent_role || (stages[0] || {}).opponent_role || '—')}</span></div>
       </div>
 
       <div class="qmf-fee-summary">
@@ -896,7 +884,7 @@
         <div class="box"><div class="v text-danger">${agg.remaining.toFixed(0)}</div><div class="k">المتبقي</div></div>
       </div>
 
-      <div class="qmf-section-title"><i class="bi bi-diagram-3"></i> المراحل (${stages.length})</div>
+      <div class="qmf-section-title"><i class="bi bi-diagram-3"></i> تطور الملف القضائي (${stages.length})</div>
       ${stagesHtml || '<div class="qmf-empty">لا توجد مراحل بعد.</div>'}
       ${serviceHtml}
     `;
@@ -1096,6 +1084,19 @@
   /* ============================================================
    * 12) فتح المرحلة في واجهة القضية (جلسات/أتعاب/مستندات)
    * ============================================================ */
+  async function openPartyDetails(stageId, kind) {
+    const { db, esc } = G();
+    const stage = await db.cases.get(stageId);
+    if (!stage) return;
+    const rows = await db.caseParties.where('case_id').equals(stageId).toArray().catch(() => []);
+    const isClient = kind === 'client';
+    const fallback = isClient ? { name: stage.client_name, role: stage.client_role, phone: stage.client_phone, address: stage.client_address, email: stage.client_email, national_id: stage.client_national_id, power_of_attorney_number: stage.client_power_number, power_of_attorney_year: stage.client_power_year, notary_office: stage.client_notary_office } : { name: stage.opponent_name, role: stage.opponent_role, phone: stage.opponent_phone, address: stage.opponent_address, email: stage.opponent_email, national_id: stage.opponent_national_id };
+    const parties = rows.filter(p => p.party_type === kind);
+    const list = parties.length ? parties : [fallback];
+    const html = list.map(p => `<div class="text-end border-bottom pb-2 mb-2"><p><b>الاسم:</b> ${esc(p.name || '—')}</p><p><b>الصفة:</b> ${esc(p.role || '—')}</p><p><b>الهاتف:</b> ${esc(p.phone || '—')}</p><p><b>العنوان:</b> ${esc(p.address || '—')}</p><p><b>البريد الإلكتروني:</b> ${esc(p.email || '—')}</p><p><b>الرقم القومي:</b> ${esc(p.national_id || p.nationalId || '—')}</p>${isClient ? `<p><b>التوكيل:</b> ${esc(p.power_of_attorney_number || '—')}${p.power_of_attorney_year ? ' / ' + esc(p.power_of_attorney_year) : ''}${p.notary_office ? ' — ' + esc(p.notary_office) : ''}</p>` : ''}</div>`).join('');
+    const { Swal } = G();
+    if (Swal) await Swal.fire({ title: isClient ? 'بيانات العميل' : 'بيانات الخصم', html, confirmButtonText: 'إغلاق', background: '#ffffff', color: '#172b45', width: 620 });
+  }
   function editStage(stageId) {
     const { hideModal } = G();
     if (typeof hideModal === 'function') hideModal('qmfDetailsModal');
@@ -1103,9 +1104,9 @@
   }
   async function deleteStage(stageId) {
     const { db, Swal, ownerOnly, hideModal } = G();
-    if (typeof ownerOnly === 'function' && !ownerOnly('حذف المرحلة')) return;
+    if (typeof ownerOnly === 'function' && !ownerOnly('حذف درجة التقاضي')) return;
     const stage = await db.cases.get(stageId); if (!stage) return;
-    const result = Swal ? await Swal.fire({ title: 'حذف المرحلة؟', text: `سيتم حذف ${stageLabel(stage.stage_kind)} وكل جلساتها وبياناتها المالية.`, icon: 'warning', showCancelButton: true, confirmButtonText: 'حذف المرحلة', cancelButtonText: 'إلغاء', confirmButtonColor: '#b43b45' }) : { isConfirmed: true };
+    const result = Swal ? await Swal.fire({ title: 'حذف درجة التقاضي؟', text: `سيتم حذف ${stageLabel(stage.stage_kind)} وكل جلساتها وبياناتها المالية.`, icon: 'warning', showCancelButton: true, confirmButtonText: 'حذف درجة التقاضي', cancelButtonText: 'إلغاء', confirmButtonColor: '#b43b45' }) : { isConfirmed: true };
     if (!result.isConfirmed) return;
     await db.sessions.where('case_id').equals(stageId).delete().catch(() => {});
     await db.payments.where('case_id').equals(stageId).delete().catch(() => {});
@@ -1117,7 +1118,7 @@
     await db.pendingOperations.add({ operation: 'delete_case', data: { id: stageId, legal_file_id: stage.legal_file_id }, timestamp: Date.now() });
     if (typeof hideModal === 'function') hideModal('qmfDetailsModal');
     if (typeof window.loadCasesList === 'function') await window.loadCasesList();
-    if (Swal) Swal.fire({ icon: 'success', title: 'تم حذف المرحلة', timer: 1300, showConfirmButton: false });
+    if (Swal) Swal.fire({ icon: 'success', title: 'تم حذف درجة التقاضي', timer: 1300, showConfirmButton: false });
   }
   function editSession(sessionId, stageId) {
     const { hideModal } = G();
@@ -1307,6 +1308,7 @@
       addSessionForFile,
       rescheduleFileSession,
       openDetails,
+      openPartyDetails,
       openAddStage,
       saveStage,
       convertToJudicial,

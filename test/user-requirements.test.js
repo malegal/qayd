@@ -52,14 +52,14 @@ test('file details start with office code and requested summary order', () => {
   const start = qmf.indexOf('const body = `');
   const end = qmf.indexOf('document.getElementById(\'qmfDetailsBody\')', start);
   const body = qmf.slice(start, end);
-  const order = ['رقم الملف في المكتب', 'اسم العميل', 'اسم الخصم', 'عنوان الملف', 'موضوع القضية', 'نوع القضية'];
+  const order = ['رقم الملف في المكتب:', 'عنوان الملف:', 'الموضوع:', 'رقم القضية:', 'المحكمة:', 'العميل:', 'صفته:', 'الخصم:'];
   let previous = -1;
   for (const label of order) { const index = body.indexOf(label); assert.ok(index > previous, `${label} order`); previous = index; }
 });
 
 test('each stage offers edit and delete actions without generic stage wording', () => {
   assert.match(qmf, /QMF\.deleteStage/);
-  assert.match(qmf, /حذف المرحلة/);
+  assert.match(qmf, /حذف درجة التقاضي/);
   assert.doesNotMatch(qmf, /مرحلة سابقة/);
 });
 
